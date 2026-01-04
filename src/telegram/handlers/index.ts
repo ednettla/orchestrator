@@ -1,0 +1,202 @@
+/**
+ * Telegram Command Handlers Index
+ *
+ * Registry of all command handlers.
+ *
+ * @module telegram/handlers
+ */
+
+import { registerCommand } from '../router.js';
+import type { CommandDefinition } from '../types.js';
+
+// Import individual handlers
+import { startHandler, helpHandler } from './start.js';
+import { projectsHandler, switchHandler, newProjectHandler } from './project.js';
+import { planHandler, approveHandler, rejectHandler } from './plan.js';
+import { runHandler, stopHandler } from './run.js';
+import { addHandler, reqsHandler } from './requirements.js';
+import { configHandler, mcpHandler, secretsHandler } from './config.js';
+import { logsHandler } from './logs.js';
+import { statusHandler } from './status.js';
+
+// ============================================================================
+// Command Definitions
+// ============================================================================
+
+const commandDefinitions: CommandDefinition[] = [
+  // Global commands
+  {
+    name: 'start',
+    description: 'Welcome and authentication',
+    usage: '/start',
+    handler: startHandler,
+    requiredRole: 'viewer',
+    projectScoped: false,
+  },
+  {
+    name: 'help',
+    description: 'Show available commands',
+    usage: '/help',
+    handler: helpHandler,
+    requiredRole: 'viewer',
+    projectScoped: false,
+  },
+  {
+    name: 'projects',
+    description: 'List all projects',
+    usage: '/projects',
+    handler: projectsHandler,
+    requiredRole: 'viewer',
+    projectScoped: false,
+  },
+  {
+    name: 'switch',
+    description: 'Set active project for session',
+    usage: '/switch <project>',
+    handler: switchHandler,
+    requiredRole: 'viewer',
+    projectScoped: false,
+  },
+  {
+    name: 'new',
+    description: 'Create a new project',
+    usage: '/new <name>',
+    handler: newProjectHandler,
+    requiredRole: 'operator',
+    projectScoped: false,
+  },
+
+  // Project-scoped commands
+  {
+    name: 'status',
+    description: 'Show project status',
+    usage: '/<project> status',
+    handler: statusHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
+    name: 'plan',
+    description: 'Start autonomous planning',
+    usage: '/<project> plan "goal"',
+    handler: planHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'approve',
+    description: 'Approve pending plan',
+    usage: '/<project> approve',
+    handler: approveHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'reject',
+    description: 'Reject pending plan',
+    usage: '/<project> reject',
+    handler: rejectHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'run',
+    description: 'Run pending requirements',
+    usage: '/<project> run',
+    handler: runHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'stop',
+    description: 'Stop running daemon',
+    usage: '/<project> stop',
+    handler: stopHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'add',
+    description: 'Add a new requirement',
+    usage: '/<project> add "requirement"',
+    handler: addHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'reqs',
+    description: 'List requirements',
+    usage: '/<project> reqs',
+    handler: reqsHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
+    name: 'logs',
+    description: 'Show recent logs',
+    usage: '/<project> logs [n]',
+    handler: logsHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
+    name: 'config',
+    description: 'Show project configuration',
+    usage: '/<project> config',
+    handler: configHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
+    name: 'mcp',
+    description: 'List MCP servers',
+    usage: '/<project> mcp',
+    handler: mcpHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
+    name: 'secrets',
+    description: 'List secrets (no values)',
+    usage: '/<project> secrets [env]',
+    handler: secretsHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+];
+
+// ============================================================================
+// Registration
+// ============================================================================
+
+/**
+ * Register all command handlers
+ */
+export function registerAllHandlers(): void {
+  for (const definition of commandDefinitions) {
+    registerCommand(definition);
+  }
+}
+
+/**
+ * Get command help text
+ */
+export function getHelpText(): string {
+  const lines = ['📚 *Available Commands*\n'];
+
+  // Global commands
+  lines.push('*Global Commands*');
+  for (const cmd of commandDefinitions.filter((c) => !c.projectScoped)) {
+    lines.push(`\`${cmd.usage}\` - ${cmd.description}`);
+  }
+
+  lines.push('\n*Project Commands*');
+  lines.push('_Replace <project> with your project name or alias_\n');
+  for (const cmd of commandDefinitions.filter((c) => c.projectScoped)) {
+    lines.push(`\`${cmd.usage}\` - ${cmd.description}`);
+  }
+
+  return lines.join('\n');
+}
+
+export { commandDefinitions };

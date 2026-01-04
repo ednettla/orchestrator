@@ -17,6 +17,8 @@ import { writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { TechStack } from './types.js';
+import { createSecretsManager, type SecretEnvironment } from './secrets-manager.js';
+import { getProjectRegistry } from './project-registry.js';
 
 // ============================================================================
 // Types
@@ -31,6 +33,15 @@ export interface ClaudeMdConfig {
     coverageThreshold: number;
   };
   mcpServers: string[];
+}
+
+export interface RegenerateOptions {
+  /** Inject secrets into template placeholders */
+  injectSecrets?: boolean | undefined;
+  /** Environment to use when injecting secrets (default: 'development') */
+  environment?: SecretEnvironment | undefined;
+  /** Include cloud service URLs in the output */
+  includeCloudServices?: boolean | undefined;
 }
 
 // ============================================================================
@@ -81,8 +92,26 @@ export class ClaudeMdGenerator {
   /**
    * Regenerate CLAUDE.md with new configuration
    */
-  async regenerate(projectPath: string, config: ClaudeMdConfig): Promise<void> {
-    const content = this.generateContent(config);
+  async regenerate(
+    projectPath: string,
+    config: ClaudeMdConfig,
+    options?: RegenerateOptions
+  ): Promise<void> {
+    let content = this.generateContent(config);
+
+    // Add cloud services section if requested and available
+    if (options?.includeCloudServices) {
+      const cloudServicesSection = await this.generateCloudServicesSection(projectPath);
+      if (cloudServicesSection) {
+        content += '\n\n' + cloudServicesSection;
+      }
+    }
+
+    // Inject secrets if requested
+    if (options?.injectSecrets) {
+      content = this.resolveTemplates(projectPath, content, options.environment ?? 'development');
+    }
+
     await this.writeClaudeMd(projectPath, content);
   }
 
@@ -428,6 +457,117 @@ cn("base-class", condition && "conditional-class")
 | \`npm run test:coverage\` | Run tests with coverage report |
 | \`npm run lint\` | Run ESLint |
 | \`npm run typecheck\` | Run TypeScript type checking |`;
+  }
+
+  // ============================================================================
+  // Template Resolution
+  // ============================================================================
+
+  /**
+   * Resolve template placeholders in content
+   *
+   * Supported placeholders:
+   * - {{secrets.env.key}} - Resolve secrets (e.g., {{secrets.production.supabase_url}})
+   * - {{cloud.service.field}} - Resolve cloud service URLs (e.g., {{cloud.github.url}})
+   */
+  private resolveTemplates(
+    projectPath: string,
+    content: string,
+    defaultEnv: SecretEnvironment
+  ): string {
+    // Resolve secrets placeholders: {{secrets.env.key}}
+    content = content.replace(
+      /\{\{secrets\.(\w+)\.(\w+)\}\}/g,
+      (match, envStr: string, key: string) => {
+        const env = this.parseEnvironment(envStr) ?? defaultEnv;
+        const secrets = createSecretsManager(projectPath);
+        const value = secrets.getSecret(env, key);
+        return value ?? match; // Keep original if not found
+      }
+    );
+
+    // Resolve cloud service placeholders: {{cloud.service.field}}
+    content = content.replace(
+      /\{\{cloud\.(\w+)\.(\w+)\}\}/g,
+      (match, service: string, field: string) => {
+        const registry = getProjectRegistry();
+        const project = registry.getProject(projectPath);
+        if (!project?.cloudServices) return match;
+
+        const serviceUrl = project.cloudServices[service as keyof typeof project.cloudServices];
+        if (!serviceUrl) return match;
+
+        // For now, we only support 'url' field
+        if (field === 'url') {
+          return serviceUrl;
+        }
+
+        return match;
+      }
+    );
+
+    return content;
+  }
+
+  /**
+   * Parse environment string to SecretEnvironment type
+   */
+  private parseEnvironment(env: string): SecretEnvironment | null {
+    if (env === 'development' || env === 'staging' || env === 'production') {
+      return env;
+    }
+    return null;
+  }
+
+  /**
+   * Generate cloud services section from project registry
+   */
+  private async generateCloudServicesSection(projectPath: string): Promise<string | null> {
+    const registry = getProjectRegistry();
+    const project = registry.getProject(projectPath);
+
+    if (!project?.cloudServices) {
+      return null;
+    }
+
+    const { github, supabase, vercel } = project.cloudServices;
+
+    if (!github && !supabase && !vercel) {
+      return null;
+    }
+
+    const lines = ['## Cloud Services', ''];
+
+    if (github) {
+      lines.push(`- **GitHub**: ${github}`);
+    }
+    if (supabase) {
+      lines.push(`- **Supabase**: ${supabase}`);
+    }
+    if (vercel) {
+      lines.push(`- **Vercel**: ${vercel}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Generate environment configuration section with secrets placeholders
+   */
+  generateEnvironmentSection(envs: SecretEnvironment[] = ['production', 'staging', 'development']): string {
+    const sections: string[] = ['## Environment Configuration', ''];
+
+    for (const env of envs) {
+      const envName = env.charAt(0).toUpperCase() + env.slice(1);
+      sections.push(`### ${envName}`);
+      sections.push('```');
+      sections.push(`SUPABASE_URL={{secrets.${env}.supabase_url}}`);
+      sections.push(`SUPABASE_ANON_KEY={{secrets.${env}.supabase_anon_key}}`);
+      sections.push('```');
+      sections.push('');
+    }
+
+    return sections.join('\n');
   }
 
   // ============================================================================

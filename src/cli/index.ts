@@ -20,6 +20,10 @@ import {
 } from './commands/mcp.js';
 import { designCommand } from './commands/design.js';
 import { mainMenuCommand } from './commands/menu.js';
+import { refreshCommand } from './commands/refresh.js';
+import { registerSecretsCommand } from './commands/secrets.js';
+import { registerProjectsCommand } from './commands/projects.js';
+import { registerTelegramCommand } from './commands/telegram.js';
 import { stopDaemon, tailLogs, printDaemonStatus } from './daemon.js';
 import {
   getCurrentVersion,
@@ -205,6 +209,26 @@ program
   .action(designCommand);
 
 // ============================================================================
+// CLAUDE.md Refresh
+// ============================================================================
+
+program
+  .command('refresh')
+  .description('Regenerate CLAUDE.md with optional secrets injection')
+  .option('-p, --path <path>', 'Project path', process.cwd())
+  .option('--inject-secrets', 'Inject secrets into template placeholders')
+  .option('--env <environment>', 'Environment for secrets (development, staging, production)', 'development')
+  .option('--include-cloud', 'Include cloud service URLs from project registry')
+  .action(async (opts) => {
+    await refreshCommand({
+      path: opts.path,
+      injectSecrets: opts.injectSecrets,
+      env: opts.env,
+      includeCloud: opts.includeCloud,
+    });
+  });
+
+// ============================================================================
 // Updates
 // ============================================================================
 
@@ -300,6 +324,24 @@ mcpCmd
     const parentOpts = cmd.parent?.opts() as { path: string };
     await mcpDisableCommand(name, { path: parentOpts.path, global: opts.global });
   });
+
+// ============================================================================
+// Secrets Management
+// ============================================================================
+
+registerSecretsCommand(program);
+
+// ============================================================================
+// Project Registry
+// ============================================================================
+
+registerProjectsCommand(program);
+
+// ============================================================================
+// Telegram Bot
+// ============================================================================
+
+registerTelegramCommand(program);
 
 // ============================================================================
 // Default Action (Interactive Menu)

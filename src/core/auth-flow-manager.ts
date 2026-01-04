@@ -3,6 +3,22 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import chalk from 'chalk';
 import type { MCPServerConfig, MCPCredential } from './mcp-types.js';
+import { credentialManager } from './credential-manager.js';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export type AuthScope = 'global' | 'project';
+
+export interface AuthOptions {
+  /** Whether to use global-first auth pattern (auth once, use everywhere) */
+  preferGlobal?: boolean | undefined;
+  /** Force auth to specific scope */
+  forceScope?: AuthScope | undefined;
+  /** Project path (required for project scope) */
+  projectPath?: string | undefined;
+}
 
 // ============================================================================
 // Auth Flow Manager
@@ -34,6 +50,109 @@ export class AuthFlowManager {
       default:
         return this.tokenFlow(serverName);
     }
+  }
+
+  /**
+   * Authorize with global-first pattern
+   *
+   * This method implements the "auth once, use everywhere" pattern:
+   * 1. First check if global credentials exist
+   * 2. If not, run auth flow and optionally save globally
+   * 3. Return credentials for use in any project
+   */
+  async authorizeGlobalFirst(
+    serverName: string,
+    config: MCPServerConfig,
+    options: AuthOptions = {}
+  ): Promise<MCPCredential> {
+    await credentialManager.initialize();
+
+    const projectPath = options.projectPath;
+    const preferGlobal = options.preferGlobal ?? true;
+    const forceScope = options.forceScope;
+
+    // Check for existing credentials
+    const existingCredential = await credentialManager.getCredential(serverName, projectPath);
+
+    if (existingCredential && !credentialManager.isCredentialExpired(existingCredential)) {
+      console.log(chalk.green(`Using existing credentials for ${serverName}`));
+      return existingCredential;
+    }
+
+    // Run auth flow
+    const credential = await this.authorize(serverName, config, projectPath ?? process.cwd());
+
+    // Determine where to save
+    let scope: AuthScope;
+
+    if (forceScope) {
+      scope = forceScope;
+    } else if (preferGlobal) {
+      // Ask user if they want to save globally
+      scope = await this.askScopePreference(serverName);
+    } else {
+      scope = projectPath ? 'project' : 'global';
+    }
+
+    // Save credential to appropriate scope
+    if (scope === 'global') {
+      await credentialManager.setCredential(serverName, credential);
+      console.log(chalk.green(`Credentials saved globally for ${serverName}`));
+    } else if (projectPath) {
+      await credentialManager.setCredential(serverName, credential, projectPath);
+      console.log(chalk.green(`Credentials saved for ${serverName} in this project`));
+    }
+
+    return credential;
+  }
+
+  /**
+   * Ask user where they want to save credentials
+   */
+  private async askScopePreference(serverName: string): Promise<AuthScope> {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    console.log();
+    console.log(chalk.cyan('Where should these credentials be saved?'));
+    console.log(chalk.dim('1. Global (use in all projects)'));
+    console.log(chalk.dim('2. Project only (use in this project only)'));
+    console.log();
+
+    const answer = await this.askQuestion(rl, 'Choice [1/2]:');
+    rl.close();
+
+    if (answer === '2') {
+      return 'project';
+    }
+
+    return 'global';
+  }
+
+  /**
+   * Check if credentials exist for a server (globally or in project)
+   */
+  async hasCredentials(serverName: string, projectPath?: string): Promise<boolean> {
+    await credentialManager.initialize();
+    return credentialManager.hasCredential(serverName, projectPath);
+  }
+
+  /**
+   * Get credentials for a server (global-first lookup)
+   */
+  async getCredentials(serverName: string, projectPath?: string): Promise<MCPCredential | null> {
+    await credentialManager.initialize();
+    return credentialManager.getCredential(serverName, projectPath);
+  }
+
+  /**
+   * List all servers with credentials
+   */
+  async listCredentialedServers(projectPath?: string): Promise<string[]> {
+    await credentialManager.initialize();
+    return credentialManager.listCredentialedServers(projectPath);
   }
 
   /**

@@ -11,6 +11,7 @@ import { CloudServicesSetup } from '../../core/cloud-setup/index.js';
 import { mcpConfigManager } from '../../core/mcp-config-manager.js';
 import { credentialManager } from '../../core/credential-manager.js';
 import { authFlowManager } from '../../core/auth-flow-manager.js';
+import { getProjectRegistry } from '../../core/project-registry.js';
 import { spawnDaemon } from '../daemon.js';
 import type { TechStack } from '../../core/types.js';
 import { DEFAULT_TECH_STACK } from '../../core/types.js';
@@ -96,6 +97,18 @@ export async function initCommand(options: InitOptions): Promise<void> {
       projectPath,
       projectName,
       techStack,
+    });
+
+    // Register project globally
+    const registry = getProjectRegistry();
+    registry.registerProject({
+      path: projectPath,
+      name: projectName,
+      techStack: {
+        frontend: techStack.frontend,
+        backend: techStack.backend,
+        database: techStack.database,
+      },
     });
 
     console.log(chalk.green('\n✅ Project initialized successfully!\n'));
@@ -204,6 +217,13 @@ export async function initCommand(options: InitOptions): Promise<void> {
           if (cloudResult.services.vercel) {
             console.log(chalk.dim('  Vercel:'), cloudResult.services.vercel.url);
           }
+
+          // Update project registry with cloud services
+          registry.updateCloudServices(projectPath, {
+            github: cloudResult.services.github?.url,
+            supabase: cloudResult.services.supabase?.credentials.projectUrl,
+            vercel: cloudResult.services.vercel?.url,
+          });
         }
       } catch (error) {
         if (error instanceof Error) {
