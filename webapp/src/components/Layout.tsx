@@ -29,7 +29,10 @@ export default function Layout({ user }: LayoutProps) {
         { path: `/project/${projectId}/requirements`, label: 'Requirements', icon: '📋' },
         { path: `/project/${projectId}/plan`, label: 'Plan', icon: '📝' },
       ]
-    : [{ path: '/projects', label: 'Projects', icon: '📁' }];
+    : [
+        { path: '/projects', label: 'Projects', icon: '📁' },
+        { path: '/auth', label: 'Auth', icon: '🔐' },
+      ];
 
   return (
     <div className={styles.layout}>
@@ -52,20 +55,18 @@ export default function Layout({ user }: LayoutProps) {
         <Outlet />
       </main>
 
-      {navItems.length > 1 && (
-        <nav className={styles.nav}>
-          {navItems.map((item) => (
-            <button
-              key={item.path}
-              className={`${styles.navItem} ${location.pathname === item.path ? styles.active : ''}`}
-              onClick={() => navigate(item.path)}
-            >
-              <span className={styles.navIcon}>{item.icon}</span>
-              <span className={styles.navLabel}>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-      )}
+      <nav className={styles.nav}>
+        {navItems.map((item) => (
+          <button
+            key={item.path}
+            className={`${styles.navItem} ${location.pathname === item.path || location.pathname.startsWith(item.path + '/') ? styles.active : ''}`}
+            onClick={() => navigate(item.path)}
+          >
+            <span className={styles.navIcon}>{item.icon}</span>
+            <span className={styles.navLabel}>{item.label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

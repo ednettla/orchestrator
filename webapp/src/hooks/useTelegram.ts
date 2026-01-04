@@ -123,7 +123,7 @@ export interface TelegramContext {
 
 export function useTelegram(): TelegramContext {
   const [isReady, setIsReady] = useState(false);
-  const webApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+  const webApp = typeof window !== 'undefined' ? window.Telegram?.WebApp ?? null : null;
 
   useEffect(() => {
     if (webApp) {

@@ -25,6 +25,7 @@ import { createRequirementsRouter } from './routes/requirements.js';
 import { createPlansRouter } from './routes/plans.js';
 import { createDashboardRouter } from './routes/dashboard.js';
 import { createAdminRouter } from './routes/admin.js';
+import { createAuthRouter } from './routes/auth.js';
 
 // ============================================================================
 // Types
@@ -171,6 +172,7 @@ export class WebAppServer {
     // Protected API routes
     this.app.use('/api/projects', authenticateJWT, createProjectsRouter());
     this.app.use('/api/admin', authenticateJWT, createAdminRouter());
+    this.app.use('/api/auth', authenticateJWT, createAuthRouter());
 
     // Project-scoped routes (nested under projects)
     // These are mounted dynamically in createProjectsRouter

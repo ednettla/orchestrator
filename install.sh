@@ -151,11 +151,35 @@ npm install
 # -----------------------------------------------------------------------------
 
 echo ""
-echo -e "${YELLOW}Building...${NC}"
+echo -e "${YELLOW}Building CLI...${NC}"
 npm run build
 
 # Make CLI executable
 chmod +x dist/cli/index.js
+
+# -----------------------------------------------------------------------------
+# Build WebApp
+# -----------------------------------------------------------------------------
+
+echo ""
+echo -e "${YELLOW}Building Telegram Mini App...${NC}"
+
+if [ -d "webapp" ]; then
+    cd webapp
+
+    # Install webapp dependencies
+    echo -e "${YELLOW}Installing webapp dependencies...${NC}"
+    npm install
+
+    # Build webapp
+    echo -e "${YELLOW}Compiling webapp...${NC}"
+    npm run build
+
+    cd ..
+    echo -e "${GREEN}✓ Telegram Mini App built${NC}"
+else
+    echo -e "${YELLOW}Webapp directory not found, skipping...${NC}"
+fi
 
 # -----------------------------------------------------------------------------
 # Link Globally

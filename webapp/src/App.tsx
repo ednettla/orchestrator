@@ -15,6 +15,7 @@ import ProjectPage from './pages/ProjectPage';
 import RequirementsPage from './pages/RequirementsPage';
 import PlanPage from './pages/PlanPage';
 import DashboardPage from './pages/DashboardPage';
+import AuthPage from './pages/AuthPage';
 
 // Components
 import Layout from './components/Layout';
@@ -32,7 +33,7 @@ interface AuthState {
 }
 
 function App() {
-  const { initData, isReady, user: telegramUser } = useTelegram();
+  const { initData, isReady } = useTelegram();
   const [auth, setAuth] = useState<AuthState>({
     status: 'loading',
     user: null,
@@ -115,6 +116,7 @@ function App() {
         <Route path="/" element={<Layout user={auth.user!} />}>
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectsPage />} />
+          <Route path="auth" element={<AuthPage />} />
           <Route path="project/:projectId" element={<ProjectPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
