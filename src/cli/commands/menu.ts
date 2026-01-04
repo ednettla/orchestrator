@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { select, input, confirm, editor } from '@inquirer/prompts';
 import chalk from 'chalk';
+import ora from 'ora';
 import { sessionManager } from '../../core/session-manager.js';
 import { PlanController } from '../../planning/plan-controller.js';
 import {
@@ -21,6 +22,7 @@ import { configInteractive } from './config.js';
 import { mcpConfigManager } from '../../core/mcp-config-manager.js';
 import { credentialManager } from '../../core/credential-manager.js';
 import { authFlowManager } from '../../core/auth-flow-manager.js';
+import { createWorktreeHealthChecker, type WorktreeIssue } from '../../core/worktree-health.js';
 import type { Plan, PlannedRequirement } from '../../core/types.js';
 import type { MCPServerConfig, MCPTransportType, MCPAuthType } from '../../core/mcp-types.js';
 
@@ -448,6 +450,7 @@ async function showConfigMenu(context: MenuContext): Promise<void> {
       choices: [
         { name: 'Project settings', value: 'project', disabled: !context.hasProject ? '(no project)' : false },
         { name: 'MCP servers', value: 'mcp' },
+        { name: 'Git worktrees', value: 'worktrees', disabled: !context.hasProject ? '(no project)' : false },
         { name: chalk.dim('Back to main menu'), value: 'back' },
       ],
     });
@@ -462,6 +465,9 @@ async function showConfigMenu(context: MenuContext): Promise<void> {
         break;
       case 'mcp':
         await showMcpMenu(context);
+        break;
+      case 'worktrees':
+        await showWorktreeMenu(context);
         break;
     }
   }
@@ -723,6 +729,237 @@ async function removeMcpServer(context: MenuContext): Promise<void> {
   await mcpConfigManager.removeServer(serverName, context.projectPath);
 
   console.log(chalk.green(`✓ Server "${serverName}" removed`));
+}
+
+// ============================================================================
+// Worktree Menu
+// ============================================================================
+
+async function showWorktreeMenu(context: MenuContext): Promise<void> {
+  while (true) {
+    console.log();
+    console.log(chalk.cyan.bold('  Git Worktree Health'));
+    console.log(chalk.dim('  ' + '─'.repeat(50)));
+
+    // Run health check
+    await sessionManager.initialize(context.projectPath);
+    const session = await sessionManager.resumeSession(context.projectPath);
+    const store = sessionManager.getStore();
+    const checker = createWorktreeHealthChecker(context.projectPath, store);
+
+    const spinner = ora('  Checking worktree health...').start();
+    const health = await checker.checkHealth(session.id);
+    spinner.stop();
+
+    if (!health.isGitRepo) {
+      console.log(chalk.dim('  Not a git repository. Worktrees not available.'));
+      sessionManager.close();
+
+      await select({
+        message: '',
+        choices: [{ name: 'Back', value: 'back' }],
+      });
+      return;
+    }
+
+    // Display status
+    const gitCount = health.gitWorktrees.length - 1; // Exclude main worktree
+    const dbCount = health.dbWorktrees.filter(w => w.status === 'active').length;
+    const issueCount = health.issues.length;
+
+    console.log(chalk.dim('  Git worktrees:'), gitCount === 0 ? chalk.green('0 (clean)') : chalk.yellow(String(gitCount)));
+    console.log(chalk.dim('  DB entries (active):'), dbCount);
+
+    if (health.healthy) {
+      console.log(chalk.green('\n  ✓ Worktrees are healthy'));
+    } else {
+      console.log(chalk.red(`\n  ⚠ Found ${issueCount} issue(s):`));
+      for (const issue of health.issues) {
+        const icon = issue.autoFixable ? chalk.yellow('⚡') : chalk.red('✗');
+        console.log(`    ${icon} ${issue.description}`);
+      }
+    }
+    console.log();
+
+    // Build choices
+    const choices: Array<{ name: string; value: string; disabled?: boolean | string }> = [];
+
+    choices.push({
+      name: 'Refresh status',
+      value: 'refresh',
+    });
+
+    if (!health.healthy) {
+      choices.push({
+        name: chalk.yellow('Auto-repair issues'),
+        value: 'repair',
+        disabled: health.issues.filter(i => i.autoFixable).length === 0 ? 'No auto-fixable issues' : false,
+      });
+    }
+
+    choices.push({
+      name: 'View worktree details',
+      value: 'details',
+      disabled: gitCount === 0 && dbCount === 0 ? 'No worktrees' : false,
+    });
+
+    choices.push({
+      name: chalk.red('Full cleanup (remove all worktrees)'),
+      value: 'cleanup',
+      disabled: gitCount === 0 && dbCount === 0 ? 'No worktrees' : false,
+    });
+
+    choices.push({
+      name: chalk.dim('Back to configuration'),
+      value: 'back',
+    });
+
+    const action = await select({
+      message: 'Worktree actions:',
+      choices,
+    });
+
+    if (action === 'back') {
+      sessionManager.close();
+      return;
+    }
+
+    switch (action) {
+      case 'refresh':
+        // Just loop to refresh
+        break;
+
+      case 'repair':
+        await repairWorktrees(checker, health.issues, session.id);
+        break;
+
+      case 'details':
+        await showWorktreeDetails(health, store, session.id);
+        break;
+
+      case 'cleanup':
+        await fullWorktreeCleanup(checker, session.id);
+        break;
+    }
+
+    sessionManager.close();
+  }
+}
+
+async function repairWorktrees(
+  checker: ReturnType<typeof createWorktreeHealthChecker>,
+  issues: WorktreeIssue[],
+  sessionId: string
+): Promise<void> {
+  const fixableIssues = issues.filter(i => i.autoFixable);
+
+  if (fixableIssues.length === 0) {
+    console.log(chalk.dim('\n  No auto-fixable issues found.'));
+    return;
+  }
+
+  console.log(chalk.cyan(`\n  Repairing ${fixableIssues.length} issue(s)...\n`));
+
+  const result = await checker.repair(fixableIssues);
+
+  for (const fixed of result.fixed) {
+    console.log(chalk.green(`  ✓ ${fixed}`));
+  }
+
+  for (const failed of result.failed) {
+    console.log(chalk.red(`  ✗ ${failed.issue}: ${failed.error}`));
+  }
+
+  if (result.success) {
+    console.log(chalk.green('\n  ✓ All issues repaired!'));
+  } else {
+    console.log(chalk.yellow('\n  ⚠ Some issues could not be repaired.'));
+  }
+
+  console.log();
+  await input({ message: chalk.dim('Press Enter to continue...') });
+}
+
+async function showWorktreeDetails(
+  health: Awaited<ReturnType<ReturnType<typeof createWorktreeHealthChecker>['checkHealth']>>,
+  store: ReturnType<typeof sessionManager.getStore>,
+  sessionId: string
+): Promise<void> {
+  console.log(chalk.cyan('\n  Git Worktrees:\n'));
+
+  for (const wt of health.gitWorktrees) {
+    const isMain = wt.path === process.cwd() || wt.branch === 'main' || wt.branch === 'master';
+
+    if (isMain) {
+      console.log(chalk.dim(`  ${wt.branch} (main worktree)`));
+    } else {
+      let status = '';
+      if (wt.locked) status += chalk.red(' [locked]');
+      if (wt.prunable) status += chalk.yellow(' [orphaned]');
+
+      console.log(`  ${chalk.blue(wt.branch)}${status}`);
+      console.log(chalk.dim(`    Path: ${wt.path}`));
+    }
+  }
+
+  console.log(chalk.cyan('\n  Database Entries:\n'));
+
+  for (const wt of health.dbWorktrees) {
+    let statusColor = chalk.white;
+    if (wt.status === 'active') statusColor = chalk.green;
+    if (wt.status === 'merged') statusColor = chalk.blue;
+    if (wt.status === 'abandoned') statusColor = chalk.dim;
+
+    console.log(`  ${wt.branchName} ${statusColor(`(${wt.status})`)}`);
+    console.log(chalk.dim(`    Created: ${wt.createdAt.toLocaleString()}`));
+    if (wt.mergedAt) {
+      console.log(chalk.dim(`    Merged: ${wt.mergedAt.toLocaleString()}`));
+    }
+  }
+
+  console.log();
+  await input({ message: chalk.dim('Press Enter to continue...') });
+}
+
+async function fullWorktreeCleanup(
+  checker: ReturnType<typeof createWorktreeHealthChecker>,
+  sessionId: string
+): Promise<void> {
+  console.log(chalk.red('\n  ⚠️  Full Worktree Cleanup'));
+  console.log(chalk.dim('  This will remove ALL worktrees and reset to a clean state.'));
+  console.log(chalk.dim('  Feature branches will be deleted.'));
+  console.log();
+
+  const confirmCleanup = await confirm({
+    message: 'Are you sure you want to proceed?',
+    default: false,
+  });
+
+  if (!confirmCleanup) {
+    console.log(chalk.dim('\n  Cleanup cancelled.'));
+    return;
+  }
+
+  console.log(chalk.cyan('\n  Cleaning up...\n'));
+
+  const result = await checker.fullCleanup(sessionId);
+
+  for (const fixed of result.fixed) {
+    console.log(chalk.green(`  ✓ ${fixed}`));
+  }
+
+  for (const failed of result.failed) {
+    console.log(chalk.red(`  ✗ ${failed.issue}: ${failed.error}`));
+  }
+
+  if (result.success) {
+    console.log(chalk.green('\n  ✓ Full cleanup complete!'));
+  } else {
+    console.log(chalk.yellow('\n  ⚠ Cleanup completed with some errors.'));
+  }
+
+  console.log();
+  await input({ message: chalk.dim('Press Enter to continue...') });
 }
 
 // ============================================================================
