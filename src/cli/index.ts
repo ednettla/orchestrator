@@ -20,13 +20,19 @@ import {
 } from './commands/mcp.js';
 import { designCommand } from './commands/design.js';
 import { stopDaemon, tailLogs, printDaemonStatus } from './daemon.js';
+import {
+  getCurrentVersion,
+  printVersionDetails,
+  updateToLatest,
+  checkForUpdates,
+} from './updater.js';
 
 const program = new Command();
 
 program
   .name('orchestrate')
   .description('Claude Code orchestrator for building full-stack web applications')
-  .version('0.1.0');
+  .version(getCurrentVersion(), '-v, --version', 'Output the current version');
 
 // ============================================================================
 // Project Initialization
@@ -196,6 +202,41 @@ program
   .option('--component <name>', 'Generate or update a specific component')
   .option('-v, --verbose', 'Show all issues (not just first 10 files)')
   .action(designCommand);
+
+// ============================================================================
+// Updates
+// ============================================================================
+
+program
+  .command('update')
+  .description('Update orchestrator to the latest version')
+  .option('-f, --force', 'Force update even if already up to date')
+  .option('-c, --check', 'Only check for updates, do not install')
+  .action(async (opts) => {
+    if (opts.check) {
+      const chalk = await import('chalk');
+      console.log(chalk.default.cyan('Checking for updates...\n'));
+      const info = await checkForUpdates();
+      if (info.isOutdated) {
+        console.log(chalk.default.yellow(`Updates available: ${info.commitsBehind} commits behind`));
+        console.log(chalk.default.dim(`  Current: ${info.current}`));
+        console.log(chalk.default.dim(`  Latest:  ${info.latest}`));
+        console.log(chalk.default.dim('\n  Run: orchestrate update'));
+      } else {
+        console.log(chalk.default.green('✓ Already up to date!'));
+        console.log(chalk.default.dim(`  Version: ${info.current}`));
+      }
+    } else {
+      await updateToLatest({ force: opts.force });
+    }
+  });
+
+program
+  .command('version-info')
+  .description('Show detailed version information')
+  .action(async () => {
+    await printVersionDetails();
+  });
 
 // ============================================================================
 // MCP Server Management

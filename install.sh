@@ -94,30 +94,49 @@ fi
 echo ""
 echo -e "${YELLOW}Installation directory: ${INSTALL_DIR}${NC}"
 
-# Create or update installation directory
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Updating existing installation...${NC}"
+IS_UPDATE=false
+
+# Check if this is an update or fresh install
+if [ -d "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR/.git" ]; then
+    IS_UPDATE=true
+    echo -e "${YELLOW}Existing installation found. Updating...${NC}"
+
+    cd "$INSTALL_DIR"
+
+    # Get current version before update
+    OLD_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "unknown")
+
+    # Pull latest changes
+    git fetch origin main
+    git reset --hard origin/main
+
+    echo -e "${GREEN}✓ Updated from git${NC}"
+elif [ -d "$INSTALL_DIR" ]; then
+    # Old installation without git, remove and reinstall
+    echo -e "${YELLOW}Reinstalling (old format detected)...${NC}"
     rm -rf "$INSTALL_DIR"
-fi
+    mkdir -p "$INSTALL_DIR"
 
-echo -e "${YELLOW}Copying source files...${NC}"
-mkdir -p "$INSTALL_DIR"
-
-# Copy source files (excluding node_modules and dist to do fresh install)
-if command -v rsync &> /dev/null; then
-    rsync -a --exclude 'node_modules' --exclude 'dist' --exclude '.git' "$SOURCE_DIR/" "$INSTALL_DIR/"
+    # Clone fresh
+    git clone "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
 else
-    # Fallback without rsync
-    cp -r "$SOURCE_DIR/src" "$INSTALL_DIR/"
-    cp "$SOURCE_DIR/package.json" "$INSTALL_DIR/"
-    cp "$SOURCE_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SOURCE_DIR/tsconfig.json" "$INSTALL_DIR/"
-    cp "$SOURCE_DIR/README.md" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SOURCE_DIR/install.sh" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SOURCE_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
+    # Fresh install
+    echo -e "${YELLOW}Fresh installation...${NC}"
+    mkdir -p "$INSTALL_DIR"
+
+    # Clone the repository (keeping .git for future updates)
+    git clone "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
 fi
 
-cd "$INSTALL_DIR"
+# Show version info
+NEW_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "unknown")
+if [ "$IS_UPDATE" = true ] && [ -n "$OLD_VERSION" ]; then
+    echo -e "${GREEN}Version: ${OLD_VERSION} → ${NEW_VERSION}${NC}"
+else
+    echo -e "${GREEN}Version: ${NEW_VERSION}${NC}"
+fi
 
 # -----------------------------------------------------------------------------
 # Install Dependencies
@@ -232,7 +251,11 @@ echo "The Chrome MCP tools will be available automatically."
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}                 Installation Complete!                     ${NC}"
+if [ "$IS_UPDATE" = true ]; then
+    echo -e "${GREEN}                   Update Complete!                         ${NC}"
+else
+    echo -e "${GREEN}                 Installation Complete!                     ${NC}"
+fi
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "Quick Start:"
@@ -241,6 +264,11 @@ echo -e "  ${GREEN}orchestrate init${NC}              # Initialize a new project
 echo -e "  ${GREEN}orchestrate plan \"Build X\"${NC}   # Create a project plan"
 echo -e "  ${GREEN}orchestrate run${NC}               # Execute requirements"
 echo -e "  ${GREEN}orchestrate --help${NC}            # Show all commands"
+echo ""
+echo "Updates:"
+echo ""
+echo -e "  ${GREEN}orchestrate update${NC}            # Update to latest version"
+echo -e "  ${GREEN}orchestrate update --check${NC}    # Check for updates"
 echo ""
 echo "Documentation: See README.md in $INSTALL_DIR"
 echo ""
