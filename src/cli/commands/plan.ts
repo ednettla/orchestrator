@@ -15,6 +15,10 @@ import { AgentMonitor } from '../../agents/monitor.js';
 import { renderDashboard } from '../../ui/dashboard.js';
 import { createDesignController } from '../../design/design-controller.js';
 import { spawnDaemon } from '../daemon.js';
+import {
+  createPostExecutionManager,
+  displayPostExecutionSummary,
+} from '../../core/post-execution-manager.js';
 import type { StreamingOptions } from '../../agents/invoker.js';
 
 interface PlanOptions {
@@ -368,12 +372,30 @@ async function executePlan(controller: PlanController, planId: string, options: 
   try {
     await runner.runWithDependencies(mappedRequirements);
 
-    // Update plan status
-    store.updatePlan(planId, { status: 'completed' });
-
     if (!useDashboard) {
       console.log(chalk.green('\n✅ Plan execution completed!\n'));
     }
+
+    // Get worktree IDs from the runner for post-execution workflow
+    const worktreeIds = runner.getWorktreeIds();
+
+    // Run post-execution workflow if we have worktrees
+    if (worktreeIds.length > 0) {
+      console.log(chalk.cyan('\n📦 Post-Build Workflow\n'));
+
+      const postExec = createPostExecutionManager(
+        session.projectPath,
+        session.id,
+        store,
+        sessionManager
+      );
+
+      const postResult = await postExec.runPostExecution(worktreeIds);
+      displayPostExecutionSummary(postResult);
+    }
+
+    // Update plan status
+    store.updatePlan(planId, { status: 'completed' });
   } catch (error) {
     console.error(chalk.red('\n❌ Plan execution failed:'), error instanceof Error ? error.message : error);
     throw error;

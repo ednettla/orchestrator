@@ -38,6 +38,7 @@ export class ConcurrentRunner {
   private useWorktrees: boolean = true;
   private monitor: AgentMonitor;
   private streamingOptions?: StreamingOptions;
+  private worktreeIds: string[] = [];
 
   constructor(sessionManager: SessionManager, options: ConcurrentRunnerOptions | number = 3) {
     this.sessionManager = sessionManager;
@@ -271,6 +272,7 @@ export class ConcurrentRunner {
         const worktree = await this.worktreeManager.create(sessionId, requirementId, slug);
         worktreePath = worktree.worktreePath;
         worktreeId = worktree.id;
+        this.worktreeIds.push(worktree.id);
         console.log(chalk.dim(`  → Created worktree: ${worktree.branchName}`));
       } catch (error) {
         console.log(chalk.yellow(`  → Worktree creation failed, using main directory`));
@@ -361,6 +363,14 @@ export class ConcurrentRunner {
 
   getRunningJobs(): Job[] {
     return Array.from(this.runningJobs.values()).map((rj) => rj.job);
+  }
+
+  /**
+   * Get all worktree IDs created during execution
+   * Used for post-execution workflow (merge, test, deploy)
+   */
+  getWorktreeIds(): string[] {
+    return [...this.worktreeIds];
   }
 
   async cancelAll(): Promise<void> {

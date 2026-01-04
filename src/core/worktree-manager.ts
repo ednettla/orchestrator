@@ -4,12 +4,19 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import type { Worktree } from './types.js';
 import type { StateStore } from '../state/store.js';
 
+export interface MergeResult {
+  success: boolean;
+  conflictFiles?: string[];
+  error?: string;
+}
+
 export interface WorktreeManager {
   create(sessionId: string, requirementId: string, slug: string): Promise<Worktree>;
   list(sessionId: string): Promise<Worktree[]>;
-  merge(worktreeId: string, targetBranch?: string): Promise<void>;
+  merge(worktreeId: string, targetBranch?: string): Promise<MergeResult>;
   cleanup(worktreeId: string): Promise<void>;
   getPath(worktreeId: string): string | null;
+  getWorktreeInfo(worktreeId: string): Worktree | null;
   isGitRepo(): Promise<boolean>;
   getCurrentBranch(): Promise<string>;
 }
@@ -99,21 +106,48 @@ export class GitWorktreeManager implements WorktreeManager {
     return this.store.getWorktreesBySession(sessionId);
   }
 
-  async merge(worktreeId: string, targetBranch?: string): Promise<void> {
+  async merge(worktreeId: string, targetBranch?: string): Promise<MergeResult> {
     const worktree = this.store.getWorktree(worktreeId);
     if (!worktree) {
-      throw new Error('Worktree not found');
+      return {
+        success: false,
+        error: 'Worktree not found',
+      };
     }
 
-    // Get current branch (should be main/master)
-    const currentBranch = targetBranch ?? await this.getCurrentBranch();
+    // Ensure we're on the target branch
+    const target = targetBranch ?? 'main';
+    try {
+      await this.execGit(['checkout', target]);
+    } catch (error) {
+      return {
+        success: false,
+        error: `Failed to checkout ${target}: ${error}`,
+      };
+    }
 
     // Merge the feature branch into target
     try {
       await this.execGit(['merge', worktree.branchName, '--no-ff', '-m',
-        `Merge ${worktree.branchName} into ${currentBranch}`]);
+        `Merge ${worktree.branchName} into ${target}`]);
     } catch (error) {
-      throw new Error(`Merge failed: ${error}. Resolve conflicts manually.`);
+      // Check for merge conflicts
+      const conflictFiles = await this.getConflictFiles();
+      if (conflictFiles.length > 0) {
+        // Abort the merge to leave repo in clean state
+        await this.execGit(['merge', '--abort']).catch(() => {});
+
+        return {
+          success: false,
+          conflictFiles,
+          error: `Merge conflict in files: ${conflictFiles.join(', ')}`,
+        };
+      }
+
+      return {
+        success: false,
+        error: `Merge failed: ${error}`,
+      };
     }
 
     // Update worktree status
@@ -124,6 +158,27 @@ export class GitWorktreeManager implements WorktreeManager {
 
     // Clean up the worktree
     await this.cleanup(worktreeId);
+
+    return { success: true };
+  }
+
+  /**
+   * Get list of files with merge conflicts
+   */
+  private async getConflictFiles(): Promise<string[]> {
+    try {
+      const result = await this.execGit(['diff', '--name-only', '--diff-filter=U']);
+      return result.trim().split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get worktree info by ID
+   */
+  getWorktreeInfo(worktreeId: string): Worktree | null {
+    return this.store.getWorktree(worktreeId);
   }
 
   async cleanup(worktreeId: string): Promise<void> {
