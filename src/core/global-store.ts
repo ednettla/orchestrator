@@ -8,6 +8,9 @@
  * - Authorized users
  * - Conversation state
  * - Telegram bot configuration
+ * - Auth sources (named credential sets)
+ * - Auth errors (tracked failures)
+ * - Paused pipelines (awaiting re-auth)
  *
  * @module global-store
  */
@@ -17,6 +20,20 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { nanoid } from 'nanoid';
+import type {
+  AuthService,
+  AuthType,
+  AuthErrorType,
+  AuthSource,
+  CreateAuthSourceParams,
+  UpdateAuthSourceParams,
+  AuthError,
+  RecordAuthErrorParams,
+  AuthResolutionMethod,
+  PausedPipeline,
+  PausePipelineParams,
+  PausedPipelineStatus,
+} from './auth-types.js';
 
 // ============================================================================
 // Types
@@ -119,6 +136,56 @@ export class GlobalStore {
       -- Create indexes
       CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON authorized_users(telegram_id);
       CREATE INDEX IF NOT EXISTS idx_conversation_telegram_id ON conversation_state(telegram_id);
+
+      -- Auth sources: Named credential sets stored globally
+      CREATE TABLE IF NOT EXISTS auth_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        service TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        credential_data TEXT NOT NULL,
+        auth_type TEXT NOT NULL,
+        is_default INTEGER DEFAULT 0,
+        last_verified_at TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      -- Auth errors: Track authentication failures
+      CREATE TABLE IF NOT EXISTS auth_errors (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        service TEXT NOT NULL,
+        error_type TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        pipeline_job_id TEXT,
+        occurred_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        resolution_method TEXT
+      );
+
+      -- Paused pipelines: Track pipelines awaiting re-auth
+      CREATE TABLE IF NOT EXISTS paused_pipelines (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        requirement_id TEXT NOT NULL,
+        paused_phase TEXT NOT NULL,
+        service TEXT NOT NULL,
+        error_id TEXT REFERENCES auth_errors(id),
+        paused_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resumed_at TEXT,
+        status TEXT NOT NULL DEFAULT 'paused'
+      );
+
+      -- Auth indexes
+      CREATE INDEX IF NOT EXISTS idx_auth_sources_service ON auth_sources(service);
+      CREATE INDEX IF NOT EXISTS idx_auth_sources_name ON auth_sources(name);
+      CREATE INDEX IF NOT EXISTS idx_auth_errors_project ON auth_errors(project_path);
+      CREATE INDEX IF NOT EXISTS idx_auth_errors_unresolved ON auth_errors(project_path) WHERE resolved_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_paused_pipelines_project ON paused_pipelines(project_path);
+      CREATE INDEX IF NOT EXISTS idx_paused_pipelines_status ON paused_pipelines(status);
     `);
   }
 
@@ -423,6 +490,438 @@ export class GlobalStore {
   }
 
   // ==========================================================================
+  // Auth Sources
+  // ==========================================================================
+
+  /**
+   * Create a new auth source
+   */
+  createAuthSource(params: CreateAuthSourceParams): AuthSource {
+    const id = nanoid();
+    const now = new Date().toISOString();
+
+    // If setting as default, clear other defaults for this service
+    if (params.isDefault) {
+      this.db.prepare(`
+        UPDATE auth_sources SET is_default = 0 WHERE service = ?
+      `).run(params.service);
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO auth_sources (
+        id, name, service, display_name, credential_data, auth_type,
+        is_default, expires_at, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      params.name,
+      params.service,
+      params.displayName,
+      JSON.stringify(params.credential),
+      params.authType,
+      params.isDefault ? 1 : 0,
+      params.expiresAt?.toISOString() ?? null,
+      now,
+      now
+    );
+
+    return this.getAuthSource(params.name)!;
+  }
+
+  /**
+   * Get an auth source by name
+   */
+  getAuthSource(name: string): AuthSource | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_sources WHERE name = ?
+    `);
+
+    const row = stmt.get(name) as DatabaseAuthSourceRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAuthSource(row);
+  }
+
+  /**
+   * Get an auth source by ID
+   */
+  getAuthSourceById(id: string): AuthSource | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_sources WHERE id = ?
+    `);
+
+    const row = stmt.get(id) as DatabaseAuthSourceRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAuthSource(row);
+  }
+
+  /**
+   * List all auth sources, optionally filtered by service
+   */
+  listAuthSources(service?: AuthService): AuthSource[] {
+    let stmt;
+    if (service) {
+      stmt = this.db.prepare(`
+        SELECT * FROM auth_sources WHERE service = ? ORDER BY is_default DESC, name ASC
+      `);
+      const rows = stmt.all(service) as DatabaseAuthSourceRow[];
+      return rows.map((row) => this.rowToAuthSource(row));
+    } else {
+      stmt = this.db.prepare(`
+        SELECT * FROM auth_sources ORDER BY service ASC, is_default DESC, name ASC
+      `);
+      const rows = stmt.all() as DatabaseAuthSourceRow[];
+      return rows.map((row) => this.rowToAuthSource(row));
+    }
+  }
+
+  /**
+   * Get the default auth source for a service
+   */
+  getDefaultAuthSource(service: AuthService): AuthSource | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_sources WHERE service = ? AND is_default = 1
+    `);
+
+    const row = stmt.get(service) as DatabaseAuthSourceRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAuthSource(row);
+  }
+
+  /**
+   * Update an auth source
+   */
+  updateAuthSource(name: string, updates: UpdateAuthSourceParams): AuthSource | null {
+    const existing = this.getAuthSource(name);
+    if (!existing) return null;
+
+    const sets: string[] = ['updated_at = datetime(\'now\')'];
+    const values: (string | number | null)[] = [];
+
+    if (updates.displayName !== undefined) {
+      sets.push('display_name = ?');
+      values.push(updates.displayName);
+    }
+    if (updates.isDefault !== undefined) {
+      // If setting as default, clear other defaults for this service
+      if (updates.isDefault) {
+        this.db.prepare(`
+          UPDATE auth_sources SET is_default = 0 WHERE service = ?
+        `).run(existing.service);
+      }
+      sets.push('is_default = ?');
+      values.push(updates.isDefault ? 1 : 0);
+    }
+    if (updates.lastVerifiedAt !== undefined) {
+      sets.push('last_verified_at = ?');
+      values.push(updates.lastVerifiedAt?.toISOString() ?? null);
+    }
+    if (updates.expiresAt !== undefined) {
+      sets.push('expires_at = ?');
+      values.push(updates.expiresAt?.toISOString() ?? null);
+    }
+
+    values.push(name);
+    const stmt = this.db.prepare(
+      `UPDATE auth_sources SET ${sets.join(', ')} WHERE name = ?`
+    );
+    stmt.run(...values);
+
+    return this.getAuthSource(name);
+  }
+
+  /**
+   * Update the credential data for an auth source
+   */
+  updateAuthSourceCredential(name: string, credentialData: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE auth_sources SET credential_data = ?, updated_at = datetime('now')
+      WHERE name = ?
+    `);
+
+    const result = stmt.run(credentialData, name);
+    return result.changes > 0;
+  }
+
+  /**
+   * Get the encrypted credential data for an auth source
+   */
+  getAuthSourceCredentialData(name: string): string | null {
+    const stmt = this.db.prepare(`
+      SELECT credential_data FROM auth_sources WHERE name = ?
+    `);
+
+    const row = stmt.get(name) as { credential_data: string } | undefined;
+    return row?.credential_data ?? null;
+  }
+
+  /**
+   * Set an auth source as the default for its service
+   */
+  setDefaultAuthSource(name: string): boolean {
+    const source = this.getAuthSource(name);
+    if (!source) return false;
+
+    // Clear existing default
+    this.db.prepare(`
+      UPDATE auth_sources SET is_default = 0 WHERE service = ?
+    `).run(source.service);
+
+    // Set new default
+    const stmt = this.db.prepare(`
+      UPDATE auth_sources SET is_default = 1, updated_at = datetime('now')
+      WHERE name = ?
+    `);
+
+    const result = stmt.run(name);
+    return result.changes > 0;
+  }
+
+  /**
+   * Delete an auth source
+   */
+  deleteAuthSource(name: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM auth_sources WHERE name = ?
+    `);
+
+    const result = stmt.run(name);
+    return result.changes > 0;
+  }
+
+  // ==========================================================================
+  // Auth Errors
+  // ==========================================================================
+
+  /**
+   * Record an auth error
+   */
+  recordAuthError(params: RecordAuthErrorParams): AuthError {
+    const id = nanoid();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO auth_errors (
+        id, project_path, service, error_type, error_message, pipeline_job_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      params.projectPath,
+      params.service,
+      params.errorType,
+      params.errorMessage,
+      params.pipelineJobId ?? null
+    );
+
+    return this.getAuthError(id)!;
+  }
+
+  /**
+   * Get an auth error by ID
+   */
+  getAuthError(id: string): AuthError | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_errors WHERE id = ?
+    `);
+
+    const row = stmt.get(id) as DatabaseAuthErrorRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAuthError(row);
+  }
+
+  /**
+   * Get unresolved auth errors for a project
+   */
+  getUnresolvedAuthErrors(projectPath: string): AuthError[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_errors
+      WHERE project_path = ? AND resolved_at IS NULL
+      ORDER BY occurred_at DESC
+    `);
+
+    const rows = stmt.all(projectPath) as DatabaseAuthErrorRow[];
+    return rows.map((row) => this.rowToAuthError(row));
+  }
+
+  /**
+   * Get recent auth errors for a project
+   */
+  getRecentAuthErrors(projectPath: string, limit = 10): AuthError[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM auth_errors
+      WHERE project_path = ?
+      ORDER BY occurred_at DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(projectPath, limit) as DatabaseAuthErrorRow[];
+    return rows.map((row) => this.rowToAuthError(row));
+  }
+
+  /**
+   * Resolve an auth error
+   */
+  resolveAuthError(id: string, method: AuthResolutionMethod): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE auth_errors
+      SET resolved_at = datetime('now'), resolution_method = ?
+      WHERE id = ?
+    `);
+
+    const result = stmt.run(method, id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Resolve all unresolved errors for a service in a project
+   */
+  resolveAuthErrorsForService(
+    projectPath: string,
+    service: AuthService,
+    method: AuthResolutionMethod
+  ): number {
+    const stmt = this.db.prepare(`
+      UPDATE auth_errors
+      SET resolved_at = datetime('now'), resolution_method = ?
+      WHERE project_path = ? AND service = ? AND resolved_at IS NULL
+    `);
+
+    const result = stmt.run(method, projectPath, service);
+    return result.changes;
+  }
+
+  // ==========================================================================
+  // Paused Pipelines
+  // ==========================================================================
+
+  /**
+   * Pause a pipeline due to auth failure
+   */
+  pausePipeline(params: PausePipelineParams): PausedPipeline {
+    const id = nanoid();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO paused_pipelines (
+        id, project_path, job_id, requirement_id, paused_phase, service, error_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      params.projectPath,
+      params.jobId,
+      params.requirementId,
+      params.pausedPhase,
+      params.service,
+      params.errorId
+    );
+
+    return this.getPausedPipeline(id)!;
+  }
+
+  /**
+   * Get a paused pipeline by ID
+   */
+  getPausedPipeline(id: string): PausedPipeline | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM paused_pipelines WHERE id = ?
+    `);
+
+    const row = stmt.get(id) as DatabasePausedPipelineRow | undefined;
+    if (!row) return null;
+
+    return this.rowToPausedPipeline(row);
+  }
+
+  /**
+   * Get the active paused pipeline for a project
+   */
+  getActivePausedPipeline(projectPath: string): PausedPipeline | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM paused_pipelines
+      WHERE project_path = ? AND status = 'paused'
+      ORDER BY paused_at DESC
+      LIMIT 1
+    `);
+
+    const row = stmt.get(projectPath) as DatabasePausedPipelineRow | undefined;
+    if (!row) return null;
+
+    return this.rowToPausedPipeline(row);
+  }
+
+  /**
+   * List all paused pipelines
+   */
+  listPausedPipelines(status?: PausedPipelineStatus): PausedPipeline[] {
+    let stmt;
+    if (status) {
+      stmt = this.db.prepare(`
+        SELECT * FROM paused_pipelines WHERE status = ? ORDER BY paused_at DESC
+      `);
+      const rows = stmt.all(status) as DatabasePausedPipelineRow[];
+      return rows.map((row) => this.rowToPausedPipeline(row));
+    } else {
+      stmt = this.db.prepare(`
+        SELECT * FROM paused_pipelines ORDER BY paused_at DESC
+      `);
+      const rows = stmt.all() as DatabasePausedPipelineRow[];
+      return rows.map((row) => this.rowToPausedPipeline(row));
+    }
+  }
+
+  /**
+   * Resume a paused pipeline
+   */
+  resumePipeline(id: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE paused_pipelines
+      SET status = 'resumed', resumed_at = datetime('now')
+      WHERE id = ? AND status = 'paused'
+    `);
+
+    const result = stmt.run(id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Cancel a paused pipeline
+   */
+  cancelPipeline(id: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE paused_pipelines
+      SET status = 'cancelled', resumed_at = datetime('now')
+      WHERE id = ? AND status = 'paused'
+    `);
+
+    const result = stmt.run(id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Resume all paused pipelines for a service
+   */
+  resumePipelinesForService(service: AuthService): number {
+    const stmt = this.db.prepare(`
+      UPDATE paused_pipelines
+      SET status = 'resumed', resumed_at = datetime('now')
+      WHERE service = ? AND status = 'paused'
+    `);
+
+    const result = stmt.run(service);
+    return result.changes;
+  }
+
+  // ==========================================================================
   // Utility Methods
   // ==========================================================================
 
@@ -459,6 +958,59 @@ export class GlobalStore {
   }
 
   /**
+   * Convert database row to AuthSource
+   */
+  private rowToAuthSource(row: DatabaseAuthSourceRow): AuthSource {
+    return {
+      id: row.id,
+      name: row.name,
+      service: row.service as AuthService,
+      displayName: row.display_name,
+      authType: row.auth_type as AuthType,
+      isDefault: row.is_default === 1,
+      lastVerifiedAt: row.last_verified_at ? new Date(row.last_verified_at) : null,
+      expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    };
+  }
+
+  /**
+   * Convert database row to AuthError
+   */
+  private rowToAuthError(row: DatabaseAuthErrorRow): AuthError {
+    return {
+      id: row.id,
+      projectPath: row.project_path,
+      service: row.service as AuthService,
+      errorType: row.error_type as AuthErrorType,
+      errorMessage: row.error_message,
+      pipelineJobId: row.pipeline_job_id,
+      occurredAt: new Date(row.occurred_at),
+      resolvedAt: row.resolved_at ? new Date(row.resolved_at) : null,
+      resolutionMethod: row.resolution_method as AuthResolutionMethod | null,
+    };
+  }
+
+  /**
+   * Convert database row to PausedPipeline
+   */
+  private rowToPausedPipeline(row: DatabasePausedPipelineRow): PausedPipeline {
+    return {
+      id: row.id,
+      projectPath: row.project_path,
+      jobId: row.job_id,
+      requirementId: row.requirement_id,
+      pausedPhase: row.paused_phase,
+      service: row.service as AuthService,
+      errorId: row.error_id,
+      pausedAt: new Date(row.paused_at),
+      resumedAt: row.resumed_at ? new Date(row.resumed_at) : null,
+      status: row.status as PausedPipelineStatus,
+    };
+  }
+
+  /**
    * Close database connection
    */
   close(): void {
@@ -488,6 +1040,45 @@ interface DatabaseConversationRow {
   pending_confirmation_data: string | null;
   created_at: string;
   expires_at: string;
+}
+
+interface DatabaseAuthSourceRow {
+  id: string;
+  name: string;
+  service: string;
+  display_name: string;
+  credential_data: string;
+  auth_type: string;
+  is_default: number;
+  last_verified_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DatabaseAuthErrorRow {
+  id: string;
+  project_path: string;
+  service: string;
+  error_type: string;
+  error_message: string;
+  pipeline_job_id: string | null;
+  occurred_at: string;
+  resolved_at: string | null;
+  resolution_method: string | null;
+}
+
+interface DatabasePausedPipelineRow {
+  id: string;
+  project_path: string;
+  job_id: string;
+  requirement_id: string;
+  paused_phase: string;
+  service: string;
+  error_id: string;
+  paused_at: string;
+  resumed_at: string | null;
+  status: string;
 }
 
 // ============================================================================

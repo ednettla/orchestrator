@@ -29,6 +29,11 @@ import type {
   CloudService,
   CloudEnvironment,
 } from '../core/types.js';
+import type {
+  AuthService,
+  AuthBinding,
+  CreateAuthBindingParams,
+} from '../core/auth-types.js';
 
 // ============================================================================
 // State Store Interface
@@ -94,6 +99,13 @@ export interface StateStore {
   getCloudServiceLinks(sessionId: string): CloudServiceLink[];
   getCloudServiceLink(sessionId: string, service: CloudService): CloudServiceLink | null;
   deleteCloudServiceLink(id: string): void;
+
+  // Auth binding operations
+  createAuthBinding(params: CreateAuthBindingParams): AuthBinding;
+  getAuthBinding(sessionId: string, service: AuthService): AuthBinding | null;
+  getAuthBindingsBySession(sessionId: string): AuthBinding[];
+  updateAuthBinding(sessionId: string, service: AuthService, authSourceName: string): AuthBinding | null;
+  deleteAuthBinding(sessionId: string, service: AuthService): boolean;
 
   // Utility
   close(): void;
@@ -362,6 +374,16 @@ export class SQLiteStore implements StateStore {
         linked_at TEXT NOT NULL
       );
 
+      -- Auth bindings: Project -> Auth Source mappings
+      CREATE TABLE IF NOT EXISTS auth_bindings (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        service TEXT NOT NULL,
+        auth_source_name TEXT NOT NULL,
+        bound_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(session_id, service)
+      );
+
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_requirements_session ON requirements(session_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
@@ -379,6 +401,7 @@ export class SQLiteStore implements StateStore {
       CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
       CREATE INDEX IF NOT EXISTS idx_cloud_links_session ON cloud_service_links(session_id);
       CREATE INDEX IF NOT EXISTS idx_cloud_links_service ON cloud_service_links(service);
+      CREATE INDEX IF NOT EXISTS idx_auth_bindings_session ON auth_bindings(session_id);
     `);
 
     // Migration: Add design_system column to existing sessions tables
@@ -949,6 +972,80 @@ export class SQLiteStore implements StateStore {
   }
 
   // --------------------------------------------------------------------------
+  // Auth Bindings
+  // --------------------------------------------------------------------------
+
+  createAuthBinding(params: CreateAuthBindingParams): AuthBinding {
+    const id = nanoid();
+    const now = new Date().toISOString();
+
+    // Use INSERT OR REPLACE to handle the UNIQUE constraint
+    this.db.prepare(`
+      INSERT INTO auth_bindings (id, session_id, service, auth_source_name, bound_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(session_id, service) DO UPDATE SET
+        auth_source_name = excluded.auth_source_name,
+        bound_at = excluded.bound_at
+    `).run(id, params.sessionId, params.service, params.authSourceName, now);
+
+    return this.getAuthBinding(params.sessionId, params.service)!;
+  }
+
+  getAuthBinding(sessionId: string, service: AuthService): AuthBinding | null {
+    const row = this.db.prepare(
+      'SELECT * FROM auth_bindings WHERE session_id = ? AND service = ?'
+    ).get(sessionId, service) as AuthBindingRow | undefined;
+
+    return row ? this.mapAuthBinding(row) : null;
+  }
+
+  getAuthBindingsBySession(sessionId: string): AuthBinding[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM auth_bindings WHERE session_id = ? ORDER BY service ASC'
+    ).all(sessionId) as AuthBindingRow[];
+
+    return rows.map((row) => this.mapAuthBinding(row));
+  }
+
+  updateAuthBinding(
+    sessionId: string,
+    service: AuthService,
+    authSourceName: string
+  ): AuthBinding | null {
+    const now = new Date().toISOString();
+
+    const result = this.db.prepare(`
+      UPDATE auth_bindings SET auth_source_name = ?, bound_at = ?
+      WHERE session_id = ? AND service = ?
+    `).run(authSourceName, now, sessionId, service);
+
+    if (result.changes === 0) {
+      // Binding doesn't exist, create it
+      return this.createAuthBinding({ sessionId, service, authSourceName });
+    }
+
+    return this.getAuthBinding(sessionId, service);
+  }
+
+  deleteAuthBinding(sessionId: string, service: AuthService): boolean {
+    const result = this.db.prepare(
+      'DELETE FROM auth_bindings WHERE session_id = ? AND service = ?'
+    ).run(sessionId, service);
+
+    return result.changes > 0;
+  }
+
+  private mapAuthBinding(row: AuthBindingRow): AuthBinding {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      service: row.service as AuthService,
+      authSourceName: row.auth_source_name,
+      boundAt: new Date(row.bound_at),
+    };
+  }
+
+  // --------------------------------------------------------------------------
   // Utility
   // --------------------------------------------------------------------------
 
@@ -1218,6 +1315,14 @@ interface CloudServiceLinkRow {
   environment: string;
   metadata: string | null;
   linked_at: string;
+}
+
+interface AuthBindingRow {
+  id: string;
+  session_id: string;
+  service: string;
+  auth_source_name: string;
+  bound_at: string;
 }
 
 // ============================================================================
