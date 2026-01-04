@@ -97,6 +97,30 @@ export async function startBot(): Promise<void> {
   await bot.start({
     onStart: async (botInfo) => {
       console.log(`Bot started: @${botInfo.username}`);
+
+      // Register commands with Telegram for autocomplete menu
+      try {
+        await bot!.api.setMyCommands([
+          { command: 'start', description: 'Welcome and getting started' },
+          { command: 'help', description: 'Show all available commands' },
+          { command: 'webapp', description: 'Open the Mini App' },
+          { command: 'projects', description: 'List all projects' },
+          { command: 'switch', description: 'Set active project' },
+          { command: 'init', description: 'Initialize a new project' },
+          { command: 'paths', description: 'Manage allowed project paths' },
+          { command: 'status', description: 'Show project status' },
+          { command: 'plan', description: 'Create autonomous project plan' },
+          { command: 'run', description: 'Execute pending requirements' },
+          { command: 'add', description: 'Add a new requirement' },
+          { command: 'reqs', description: 'List all requirements' },
+          { command: 'logs', description: 'View recent logs' },
+          { command: 'stop', description: 'Stop running daemon' },
+        ]);
+        console.log('Bot commands registered with Telegram');
+      } catch (error) {
+        console.error('Failed to register commands:', error);
+      }
+
       if (webappConfig.enabled && webappServer) {
         const baseUrl = webappConfig.baseUrl ?? `http://localhost:${webappConfig.port}`;
         console.log(`WebApp available at: ${baseUrl}`);

@@ -1,7 +1,7 @@
 /**
  * Run Handlers
  *
- * Handle run and stop commands.
+ * Handle run, stop, resume, and refresh commands.
  *
  * @module telegram/handlers/run
  */
@@ -9,7 +9,7 @@
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { stopConfirmKeyboard } from '../keyboards.js';
-import { startRun, stopDaemon, getProjectStatus, getDaemonStatus } from '../project-bridge.js';
+import { startRun, stopDaemon, getProjectStatus, getDaemonStatus, resumeSession, refreshClaudeMd } from '../project-bridge.js';
 
 /**
  * Handle run command
@@ -148,5 +148,113 @@ export async function stopHandler(ctx: CommandContext): Promise<CommandResult> {
   return {
     success: true,
     response: `⏹ Daemon stopped for ${project.name}`,
+  };
+}
+
+/**
+ * Handle resume command - resume interrupted session
+ */
+export async function resumeHandler(ctx: CommandContext): Promise<CommandResult> {
+  const { projectName } = ctx;
+
+  if (!projectName) {
+    return {
+      success: false,
+      response: 'Project name required.',
+    };
+  }
+
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    return {
+      success: false,
+      response: `Project not found: \`${projectName}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Check if daemon is already running
+  const daemonStatus = await getDaemonStatus(project.path);
+  if (daemonStatus.running) {
+    return {
+      success: false,
+      response:
+        `⚠️ Daemon is already running for ${project.name}\n\n` +
+        `Use \`/${project.name} status\` to check progress.`,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Resume session
+  const result = await resumeSession(project.path);
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to resume:\n${result.error ?? result.output}`,
+    };
+  }
+
+  return {
+    success: true,
+    response:
+      `🔄 *Session Resumed*\n\n` +
+      `Project: ${project.name}\n\n` +
+      `The daemon is resuming interrupted work.\n\n` +
+      `Commands:\n` +
+      `• \`/${project.name} status\` - Check progress\n` +
+      `• \`/${project.name} logs\` - View logs`,
+    parseMode: 'Markdown',
+  };
+}
+
+/**
+ * Handle refresh command - regenerate CLAUDE.md
+ */
+export async function refreshHandler(ctx: CommandContext): Promise<CommandResult> {
+  const { projectName, args } = ctx;
+
+  if (!projectName) {
+    return {
+      success: false,
+      response: 'Project name required.',
+    };
+  }
+
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    return {
+      success: false,
+      response: `Project not found: \`${projectName}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Parse options
+  const injectSecrets = args.includes('--secrets');
+  const env = args.find((a) => a.startsWith('--env='))?.split('=')[1] ?? 'development';
+
+  // Refresh CLAUDE.md
+  const result = await refreshClaudeMd(project.path, { injectSecrets, env });
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to refresh:\n${result.error ?? result.output}`,
+    };
+  }
+
+  return {
+    success: true,
+    response:
+      `✅ *CLAUDE.md Regenerated*\n\n` +
+      `Project: ${project.name}\n` +
+      (injectSecrets ? `Environment: ${env}\n` : '') +
+      `\nThe project context has been updated.`,
+    parseMode: 'Markdown',
   };
 }

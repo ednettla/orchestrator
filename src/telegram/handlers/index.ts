@@ -13,7 +13,7 @@ import type { CommandDefinition } from '../types.js';
 import { startHandler, helpHandler, webappHandler } from './start.js';
 import { projectsHandler, switchHandler, newProjectHandler } from './project.js';
 import { planHandler, approveHandler, rejectHandler, answerHandler, questionsHandler } from './plan.js';
-import { runHandler, stopHandler } from './run.js';
+import { runHandler, stopHandler, resumeHandler, refreshHandler } from './run.js';
 import { addHandler, editHandler, priorityHandler, deleteHandler, reqsHandler } from './requirements.js';
 import { configHandler, mcpHandler, secretsHandler } from './config.js';
 import { logsHandler } from './logs.js';
@@ -141,6 +141,22 @@ const commandDefinitions: CommandDefinition[] = [
     description: 'Stop running daemon',
     usage: '/<project> stop',
     handler: stopHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'resume',
+    description: 'Resume interrupted session',
+    usage: '/<project> resume',
+    handler: resumeHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'refresh',
+    description: 'Regenerate CLAUDE.md',
+    usage: '/<project> refresh [--secrets]',
+    handler: refreshHandler,
     requiredRole: 'operator',
     projectScoped: true,
   },

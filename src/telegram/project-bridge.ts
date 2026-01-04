@@ -890,3 +890,27 @@ export async function generateDesignSystemFromApi(projectPath: string): Promise<
     };
   }
 }
+
+/**
+ * Resume interrupted session (for Telegram bot)
+ */
+export async function resumeSession(projectPath: string): Promise<CommandResult> {
+  return executeCommand(projectPath, 'resume', ['--background']);
+}
+
+/**
+ * Refresh CLAUDE.md (for Telegram bot)
+ */
+export async function refreshClaudeMd(
+  projectPath: string,
+  options: { injectSecrets?: boolean; env?: string }
+): Promise<CommandResult> {
+  const args: string[] = [];
+  if (options.injectSecrets) {
+    args.push('--inject-secrets');
+    if (options.env) {
+      args.push(`--env=${options.env}`);
+    }
+  }
+  return executeCommand(projectPath, 'refresh', args);
+}
