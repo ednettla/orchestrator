@@ -437,6 +437,7 @@ export async function interactiveCommand(): Promise<void> {
     );
 
     const daemonStatus = getTelegramDaemonStatus();
+    const webappConfig = store.getWebAppConfig();
     const action = await select({
       message: 'What would you like to do?',
       choices: [
@@ -451,6 +452,12 @@ export async function interactiveCommand(): Promise<void> {
         { value: 'add-user', name: 'Add user' },
         { value: 'remove-user', name: 'Remove user' },
         { value: 'list-users', name: 'List users' },
+        {
+          value: 'setup-https',
+          name: webappConfig.baseUrl?.startsWith('https://')
+            ? `Setup HTTPS (configured: ${webappConfig.baseUrl})`
+            : 'Setup HTTPS for Mini App',
+        },
         { value: 'exit', name: 'Exit' },
       ],
     });
@@ -482,6 +489,9 @@ export async function interactiveCommand(): Promise<void> {
           break;
         case 'list-users':
           await listUsersCommand();
+          break;
+        case 'setup-https':
+          await setupHttps();
           break;
       }
     } catch (error) {
