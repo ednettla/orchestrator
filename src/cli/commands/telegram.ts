@@ -26,6 +26,7 @@ import {
   tailTelegramLogs,
   formatElapsed,
 } from '../telegram-daemon.js';
+import { setupHttps } from './telegram-https.js';
 
 const ROLES: UserRole[] = ['admin', 'operator', 'viewer'];
 
@@ -558,6 +559,11 @@ export function registerTelegramCommand(program: Command): void {
     .alias('i')
     .description('Interactive telegram management')
     .action(interactiveCommand);
+
+  telegram
+    .command('setup-https')
+    .description('Setup HTTPS with Let\'s Encrypt for Mini App')
+    .action(setupHttps);
 
   // Default to interactive if no subcommand
   telegram.action(async () => {
