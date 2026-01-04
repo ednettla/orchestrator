@@ -22,15 +22,24 @@ interface VersionInfo {
  */
 export function getCurrentVersion(): string {
   try {
-    // Try to read from package.json in install directory
+    // First check if we're running from local development (not from install dir)
+    const localPkgPath = path.resolve(import.meta.dirname, '../../package.json');
+    const isRunningFromInstallDir = import.meta.dirname.startsWith(INSTALL_DIR);
+
+    // If running from local dev, use local package.json
+    if (!isRunningFromInstallDir && existsSync(localPkgPath)) {
+      const pkg = JSON.parse(readFileSync(localPkgPath, 'utf-8'));
+      return pkg.version ?? '0.0.0';
+    }
+
+    // Otherwise try the install directory
     const pkgPath = path.join(INSTALL_DIR, 'package.json');
     if (existsSync(pkgPath)) {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       return pkg.version ?? '0.0.0';
     }
 
-    // Fallback to the package.json relative to this file
-    const localPkgPath = path.resolve(import.meta.dirname, '../../package.json');
+    // Final fallback to local
     if (existsSync(localPkgPath)) {
       const pkg = JSON.parse(readFileSync(localPkgPath, 'utf-8'));
       return pkg.version ?? '0.0.0';
