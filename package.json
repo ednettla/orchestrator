@@ -1,6 +1,6 @@
 {
   "name": "orchestrator",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Claude Code orchestrator for building full-stack web applications with multi-agent pipelines",
   "type": "module",
   "main": "dist/index.js",

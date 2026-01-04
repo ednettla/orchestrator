@@ -36,7 +36,7 @@ export type TechStack = z.infer<typeof TechStackSchema>;
 export const DEFAULT_TECH_STACK: TechStack = {
   frontend: 'nextjs',
   backend: 'express',
-  database: 'postgresql',
+  database: 'supabase',
   testing: 'chrome-mcp',
   unitTesting: 'vitest',
   styling: 'tailwind',

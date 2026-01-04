@@ -48,11 +48,24 @@ export class ClaudeMdGenerator {
       this.generateHeader(projectName),
       this.generateTechStack(techStack),
       this.generateProjectStructure(techStack),
+    ];
+
+    // Add Supabase section if using Supabase
+    if (techStack.database === 'supabase') {
+      sections.push(this.generateSupabaseSection());
+    }
+
+    // Add shadcn section if using Tailwind (shadcn requires Tailwind)
+    if (techStack.styling === 'tailwind') {
+      sections.push(this.generateShadcnSection());
+    }
+
+    sections.push(
       this.generateMcpSection(mcpServers),
       this.generateTestingSection(techStack, unitTesting),
       this.generateCodeConventions(techStack),
       this.generateBuildCommands(techStack),
-    ];
+    );
 
     return sections.join('\n\n');
   }
@@ -336,6 +349,66 @@ ${e2eSection}`;
     }
 
     return conventions.join('\n');
+  }
+
+  private generateSupabaseSection(): string {
+    return `## Supabase Integration
+
+This project uses **Supabase** for database, authentication, and realtime features.
+
+### Client Setup
+\`\`\`typescript
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+\`\`\`
+
+### Available Features
+- **Database**: PostgreSQL with Row Level Security (RLS)
+- **Auth**: Email/password, OAuth providers, magic links
+- **Realtime**: Subscribe to database changes
+- **Storage**: File uploads and management
+
+### Environment Variables
+- \`NEXT_PUBLIC_SUPABASE_URL\` - Supabase project URL
+- \`NEXT_PUBLIC_SUPABASE_ANON_KEY\` - Public client key
+- \`SUPABASE_SERVICE_ROLE_KEY\` - Server-side key (never expose to client)
+
+### Best Practices
+- Use RLS policies for data access control
+- Use Server Components for authenticated data fetching
+- Use \`supabase.auth.getUser()\` to verify sessions server-side
+- Store service role key only in server environment`;
+  }
+
+  private generateShadcnSection(): string {
+    return `## UI Components (shadcn/ui)
+
+This project uses **shadcn/ui** for accessible, customizable UI components.
+
+### Available Components
+Located in \`src/components/ui/\`:
+- Button, Input, Card, Label, Form (base components)
+
+### Adding More Components
+\`\`\`bash
+npx shadcn@latest add [component-name]
+\`\`\`
+
+Common additions: dialog, dropdown-menu, select, checkbox, badge, avatar, alert
+
+### Styling Guidelines
+- Components use CSS variables from \`globals.css\`
+- Use the \`cn()\` utility for conditional class merging:
+\`\`\`typescript
+import { cn } from "@/lib/utils"
+cn("base-class", condition && "conditional-class")
+\`\`\`
+- Customize component styles via the \`className\` prop
+- Theme colors are in \`tailwind.config.ts\``;
   }
 
   private generateBuildCommands(techStack: TechStack): string {

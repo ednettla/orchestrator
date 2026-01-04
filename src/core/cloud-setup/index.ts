@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { GitHubSetup, type GitHubRepoInfo } from './github.js';
 import { SupabaseSetup, type SupabaseCredentials, type SupabaseProjectInfo } from './supabase.js';
 import { VercelSetup, type VercelProjectInfo } from './vercel.js';
+import { mcpConfigManager } from '../mcp-config-manager.js';
 import type { StateStore } from '../../state/store.js';
 import type { CloudService, CloudServiceLink } from '../types.js';
 
@@ -231,6 +232,14 @@ export class CloudServicesSetup {
             },
           });
           result.links.push(link);
+
+          // Auto-enable Supabase MCP server
+          try {
+            mcpConfigManager.setServerEnabled('supabase', true, this.projectPath);
+            console.log(chalk.dim('  MCP server enabled'));
+          } catch {
+            // MCP enable is non-critical, continue
+          }
         } else {
           result.errors.push({ service: 'Supabase', error: sbResult.error ?? 'Unknown error' });
           result.success = false;
@@ -271,6 +280,14 @@ export class CloudServicesSetup {
             },
           });
           result.links.push(link);
+
+          // Auto-enable Vercel MCP server
+          try {
+            mcpConfigManager.setServerEnabled('vercel', true, this.projectPath);
+            console.log(chalk.dim('  MCP server enabled'));
+          } catch {
+            // MCP enable is non-critical, continue
+          }
         } else {
           result.errors.push({ service: 'Vercel', error: vcResult.error ?? 'Unknown error' });
           result.success = false;

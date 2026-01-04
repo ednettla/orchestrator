@@ -183,10 +183,10 @@ export const TECH_STACK_CHOICES: Record<keyof TechStack, TechStackChoice[]> = {
     { name: 'Hono', value: 'hono', description: 'Lightweight edge-ready framework' },
   ],
   database: [
+    { name: 'Supabase', value: 'supabase', description: 'PostgreSQL with built-in auth, realtime, and storage (Recommended)' },
     { name: 'PostgreSQL', value: 'postgresql', description: 'Relational database with Prisma ORM' },
     { name: 'SQLite', value: 'sqlite', description: 'File-based database with Prisma ORM' },
     { name: 'MongoDB', value: 'mongodb', description: 'Document database with Mongoose' },
-    { name: 'Supabase', value: 'supabase', description: 'PostgreSQL with auth and realtime' },
   ],
   testing: [
     { name: 'Chrome MCP', value: 'chrome-mcp', description: 'Browser testing via Claude Chrome extension' },

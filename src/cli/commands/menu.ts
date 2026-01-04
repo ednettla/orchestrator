@@ -1206,6 +1206,20 @@ async function runInitFlow(context: MenuContext): Promise<void> {
   if (context.hasProject) {
     console.log(chalk.green('\n✓ Project initialized successfully!\n'));
 
+    // Show MCP server status
+    try {
+      const mcpConfig = await mcpConfigManager.getMergedConfig(context.projectPath);
+      const enabledServers = Object.entries(mcpConfig.mcpServers)
+        .filter(([_, config]) => config.enabled)
+        .map(([name]) => name);
+
+      if (enabledServers.length > 0) {
+        console.log(chalk.dim('  MCP Servers:'), enabledServers.join(', '));
+      }
+    } catch {
+      // MCP status is non-critical
+    }
+
     const startBuilding = await confirm({
       message: 'Would you like to start planning a project?',
       default: true,

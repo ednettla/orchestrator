@@ -469,6 +469,13 @@ export class DesignController {
   }
 
   /**
+   * Check if shadcn/ui is installed
+   */
+  isShadcnInstalled(projectPath: string): boolean {
+    return existsSync(path.join(projectPath, 'components.json'));
+  }
+
+  /**
    * Get information about the existing design system
    */
   async getDesignSystemInfo(projectPath: string, techStack: TechStack): Promise<DesignSystemInfo | null> {
@@ -477,22 +484,42 @@ export class DesignController {
       return null;
     }
 
+    // Check for shadcn/ui first - it has specific conventions
+    const hasShadcn = this.isShadcnInstalled(projectPath);
+
     // Determine paths based on what exists
     let tokensPath = '';
     let componentsPath = '';
     let themePath: string | undefined;
     const availableComponents: string[] = [];
 
-    // Check for tokens
-    const tokenPaths = [
-      'src/styles/tokens.css',
-      'src/styles/design-tokens.css',
-      'src/styles/variables.css',
-    ];
-    for (const tp of tokenPaths) {
-      if (existsSync(path.join(projectPath, tp))) {
-        tokensPath = tp;
-        break;
+    // For shadcn, tokens are in globals.css
+    if (hasShadcn) {
+      const shadcnTokenPaths = [
+        'src/app/globals.css',
+        'src/styles/globals.css',
+        'app/globals.css',
+      ];
+      for (const tp of shadcnTokenPaths) {
+        if (existsSync(path.join(projectPath, tp))) {
+          tokensPath = tp;
+          break;
+        }
+      }
+    }
+
+    // Check for tokens (non-shadcn or fallback)
+    if (!tokensPath) {
+      const tokenPaths = [
+        'src/styles/tokens.css',
+        'src/styles/design-tokens.css',
+        'src/styles/variables.css',
+      ];
+      for (const tp of tokenPaths) {
+        if (existsSync(path.join(projectPath, tp))) {
+          tokensPath = tp;
+          break;
+        }
       }
     }
 

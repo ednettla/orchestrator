@@ -5,8 +5,12 @@ import ora from 'ora';
 import { sessionManager, TECH_STACK_CHOICES, getTechStackDescription } from '../../core/session-manager.js';
 import { detectTechStack, formatDetectionResult } from '../../core/tech-stack-detector.js';
 import { setupVitest } from '../../core/vitest-setup.js';
+import { setupShadcn, isShadcnInstalled } from '../../core/shadcn-setup.js';
 import { createClaudeMdGenerator } from '../../core/claude-md-generator.js';
 import { CloudServicesSetup } from '../../core/cloud-setup/index.js';
+import { mcpConfigManager } from '../../core/mcp-config-manager.js';
+import { credentialManager } from '../../core/credential-manager.js';
+import { authFlowManager } from '../../core/auth-flow-manager.js';
 import { spawnDaemon } from '../daemon.js';
 import type { TechStack } from '../../core/types.js';
 import { DEFAULT_TECH_STACK } from '../../core/types.js';
@@ -126,6 +130,32 @@ export async function initCommand(options: InitOptions): Promise<void> {
       }
     }
 
+    // Setup shadcn/ui for Next.js + Tailwind projects
+    if (techStack.styling === 'tailwind' && techStack.frontend === 'nextjs') {
+      if (!isShadcnInstalled(projectPath)) {
+        const shadcnSpinner = ora('Setting up shadcn/ui components...').start();
+        try {
+          const shadcnResult = await setupShadcn(projectPath);
+          if (shadcnResult.success) {
+            shadcnSpinner.succeed('shadcn/ui configured');
+            console.log(chalk.dim('  Components:'), shadcnResult.componentsInstalled.join(', '));
+          } else {
+            shadcnSpinner.warn('shadcn/ui setup skipped');
+            if (shadcnResult.errors.length > 0) {
+              console.log(chalk.yellow(`  Reason: ${shadcnResult.errors[0]}`));
+            }
+          }
+        } catch (error) {
+          shadcnSpinner.warn('shadcn/ui setup skipped');
+          if (error instanceof Error) {
+            console.log(chalk.yellow(`  Reason: ${error.message}`));
+          }
+        }
+      } else {
+        console.log(chalk.dim('  shadcn/ui:'), 'Already configured');
+      }
+    }
+
     // Generate CLAUDE.md unless --no-claude-md flag is set
     if (options.claudeMd) {
       const claudeMdSpinner = ora('Generating CLAUDE.md...').start();
@@ -178,6 +208,49 @@ export async function initCommand(options: InitOptions): Promise<void> {
       } catch (error) {
         if (error instanceof Error) {
           console.log(chalk.yellow('\n⚠ Cloud setup skipped:'), error.message);
+        }
+      }
+    }
+
+    // MCP Server Authorization Check (interactive only)
+    if (options.interactive) {
+      const mcpAuthSpinner = ora('Checking MCP server authorization...').start();
+
+      try {
+        const mcpConfig = await mcpConfigManager.getMergedConfig(projectPath);
+        const serversNeedingAuth: string[] = [];
+
+        // Check which enabled MCP servers need authorization
+        for (const [name, config] of Object.entries(mcpConfig.mcpServers)) {
+          if (config.requiresAuth && config.enabled !== false) {
+            const hasAuth = credentialManager.hasCredential(name, projectPath);
+            if (!hasAuth) {
+              serversNeedingAuth.push(name);
+            }
+          }
+        }
+
+        if (serversNeedingAuth.length > 0) {
+          mcpAuthSpinner.warn(`${serversNeedingAuth.length} MCP server(s) need authorization`);
+          console.log(chalk.dim('  Servers:'), serversNeedingAuth.join(', '));
+
+          const authorizeNow = await confirm({
+            message: `Authorize MCP servers now? (${serversNeedingAuth.join(', ')})`,
+            default: true,
+          });
+
+          if (authorizeNow) {
+            for (const serverName of serversNeedingAuth) {
+              await authorizeMcpServer(serverName, projectPath);
+            }
+          }
+        } else {
+          mcpAuthSpinner.succeed('MCP servers ready');
+        }
+      } catch (error) {
+        mcpAuthSpinner.warn('MCP check skipped');
+        if (error instanceof Error) {
+          console.log(chalk.yellow(`  Reason: ${error.message}`));
         }
       }
     }
@@ -275,7 +348,7 @@ async function selectTechStack(defaults?: Partial<TechStack>): Promise<TechStack
       name: `${c.name} - ${chalk.dim(c.description)}`,
       value: c.value,
     })),
-    default: defaults?.database ?? 'postgresql',
+    default: defaults?.database ?? 'supabase',
   });
 
   const testing = await select({
@@ -304,4 +377,30 @@ async function selectTechStack(defaults?: Partial<TechStack>): Promise<TechStack
     unitTesting: 'vitest' as const,
     styling: styling as TechStack['styling'],
   };
+}
+
+/**
+ * Authorize an MCP server interactively
+ */
+async function authorizeMcpServer(serverName: string, projectPath: string): Promise<void> {
+  const config = await mcpConfigManager.getMergedConfig(projectPath);
+  const serverConfig = config.mcpServers[serverName];
+
+  if (!serverConfig) {
+    console.log(chalk.yellow(`  ⚠ Server ${serverName} not found in config`));
+    return;
+  }
+
+  console.log(chalk.cyan(`\n  Authorizing ${serverName}...`));
+
+  try {
+    const credential = await authFlowManager.authorize(serverName, serverConfig, projectPath);
+    await credentialManager.setCredential(serverName, credential, projectPath);
+    mcpConfigManager.setServerEnabled(serverName, true, projectPath);
+    console.log(chalk.green(`  ✓ ${serverName} authorized and enabled`));
+  } catch (error) {
+    if (error instanceof Error) {
+      console.log(chalk.yellow(`  ⚠ Failed to authorize ${serverName}: ${error.message}`));
+    }
+  }
 }
