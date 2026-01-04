@@ -221,6 +221,7 @@ interface CreateCloudServiceLinkParams {
 export class SQLiteStore implements StateStore {
   private db: Database.Database;
   private closed = false;
+  private cleanupHandler: (() => void) | null = null;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -229,14 +230,14 @@ export class SQLiteStore implements StateStore {
     this.migrate();
 
     // Ensure database is closed on process exit to avoid WAL file issues
-    const cleanup = () => {
+    this.cleanupHandler = () => {
       if (!this.closed) {
         this.close();
       }
     };
-    process.on('exit', cleanup);
-    process.on('SIGINT', cleanup);
-    process.on('SIGTERM', cleanup);
+    process.on('exit', this.cleanupHandler);
+    process.on('SIGINT', this.cleanupHandler);
+    process.on('SIGTERM', this.cleanupHandler);
   }
 
   private migrate(): void {
@@ -956,6 +957,14 @@ export class SQLiteStore implements StateStore {
     if (!this.closed) {
       this.closed = true;
       this.db.close();
+
+      // Remove event listeners to prevent memory leaks
+      if (this.cleanupHandler) {
+        process.removeListener('exit', this.cleanupHandler);
+        process.removeListener('SIGINT', this.cleanupHandler);
+        process.removeListener('SIGTERM', this.cleanupHandler);
+        this.cleanupHandler = null;
+      }
     }
   }
 

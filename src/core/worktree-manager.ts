@@ -115,11 +115,27 @@ export class GitWorktreeManager implements WorktreeManager {
       };
     }
 
+    // Check for uncommitted changes and stash if needed
+    let hasStash = false;
+    try {
+      const status = await this.execGit(['status', '--porcelain']);
+      if (status.trim()) {
+        await this.execGit(['stash', 'push', '-m', 'orchestrator-auto-stash']);
+        hasStash = true;
+      }
+    } catch {
+      // Stash failed, continue anyway - checkout will fail if needed
+    }
+
     // Ensure we're on the target branch
     const target = targetBranch ?? 'main';
     try {
       await this.execGit(['checkout', target]);
     } catch (error) {
+      // Restore stash if we created one
+      if (hasStash) {
+        await this.execGit(['stash', 'pop']).catch(() => {});
+      }
       return {
         success: false,
         error: `Failed to checkout ${target}: ${error}`,
@@ -136,6 +152,10 @@ export class GitWorktreeManager implements WorktreeManager {
       if (conflictFiles.length > 0) {
         // Abort the merge to leave repo in clean state
         await this.execGit(['merge', '--abort']).catch(() => {});
+        // Restore stash if we created one
+        if (hasStash) {
+          await this.execGit(['stash', 'pop']).catch(() => {});
+        }
 
         return {
           success: false,
@@ -144,10 +164,19 @@ export class GitWorktreeManager implements WorktreeManager {
         };
       }
 
+      // Restore stash if we created one
+      if (hasStash) {
+        await this.execGit(['stash', 'pop']).catch(() => {});
+      }
       return {
         success: false,
         error: `Merge failed: ${error}`,
       };
+    }
+
+    // Restore stash if we created one
+    if (hasStash) {
+      await this.execGit(['stash', 'pop']).catch(() => {});
     }
 
     // Update worktree status
