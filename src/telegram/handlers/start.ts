@@ -1,14 +1,16 @@
 /**
  * Start and Help Handlers
  *
- * Handle /start and /help commands.
+ * Handle /start, /help, and /webapp commands.
  *
  * @module telegram/handlers/start
  */
 
+import { InlineKeyboard } from 'grammy';
 import type { CommandContext, CommandResult } from '../types.js';
 import { getHelpText } from './index.js';
 import { getRoleEmoji } from '../security.js';
+import { getGlobalStore } from '../../core/global-store.js';
 
 /**
  * Handle /start command
@@ -46,6 +48,46 @@ export async function helpHandler(_ctx: CommandContext): Promise<CommandResult> 
   return {
     success: true,
     response: getHelpText(),
+    parseMode: 'Markdown',
+  };
+}
+
+/**
+ * Handle /webapp command - opens the Mini App
+ */
+export async function webappHandler(_ctx: CommandContext): Promise<CommandResult> {
+  const store = getGlobalStore();
+  const webappConfig = store.getWebAppConfig();
+
+  if (!webappConfig.enabled) {
+    return {
+      success: false,
+      response: '❌ WebApp is not enabled.\n\nRun `orchestrate telegram config webapp_enabled true` on the server.',
+    };
+  }
+
+  const baseUrl = webappConfig.baseUrl ?? `http://localhost:${webappConfig.port}`;
+
+  // For HTTPS URLs, we can use the WebApp button
+  if (baseUrl.startsWith('https://')) {
+    const keyboard = new InlineKeyboard().webApp('🚀 Open Mini App', baseUrl);
+
+    return {
+      success: true,
+      response: '📱 *Orchestrator Mini App*\n\nTap the button below to open:',
+      parseMode: 'Markdown',
+      keyboard,
+    };
+  }
+
+  // For HTTP (local dev), just show the URL
+  return {
+    success: true,
+    response:
+      `📱 *Orchestrator Mini App*\n\n` +
+      `The Mini App is running at:\n${baseUrl}\n\n` +
+      `⚠️ *Note:* Telegram requires HTTPS for inline WebApp buttons.\n` +
+      `Set up HTTPS with: \`orchestrate telegram setup-https\``,
     parseMode: 'Markdown',
   };
 }
