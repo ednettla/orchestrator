@@ -10,7 +10,8 @@
 import { Bot } from 'grammy';
 import { getGlobalStore } from '../core/global-store.js';
 import { createWebAppServer, type WebAppServer } from './webapp/server.js';
-import { registerInitHandlers, registerPathsHandlers } from './handlers/index.js';
+import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, getHelpText } from './handlers/index.js';
+import { routeCommand } from './router.js';
 
 let bot: Bot | null = null;
 let webappServer: WebAppServer | null = null;
@@ -25,6 +26,9 @@ export async function startBot(): Promise<void> {
   if (!config.botToken) {
     throw new Error('Bot token not configured. Run: orchestrate telegram setup');
   }
+
+  // Register all command handlers
+  registerAllHandlers();
 
   bot = new Bot(config.botToken);
 
@@ -49,61 +53,31 @@ export async function startBot(): Promise<void> {
     // Update last active timestamp
     store.touchUser(telegramId);
 
+    // Attach user to context for handlers
+    (ctx as any).authorizedUser = user;
+
     await next();
   });
 
-  // /start command
-  bot.command('start', async (ctx) => {
-    const user = store.getUser(ctx.from?.id ?? 0);
-    await ctx.reply(
-      `👋 Welcome${user ? `, ${user.displayName}` : ''}!\n\n` +
-      `Use /help to see available commands.`
-    );
-  });
-
-  // /help command
-  bot.command('help', async (ctx) => {
-    await ctx.reply(
-      `📚 *Orchestrator Commands*\n\n` +
-      `*Global Commands*\n` +
-      `/help - Show this help\n` +
-      `/projects - List all projects\n` +
-      `/switch <name> - Set active project\n\n` +
-      `*Project Commands*\n` +
-      `/<project> status - Show project status\n` +
-      `/<project> plan "goal" - Start autonomous planning\n` +
-      `/<project> run - Run pending requirements\n` +
-      `/<project> stop - Stop running daemon\n` +
-      `/<project> logs - Show recent logs\n\n` +
-      `More commands coming soon!`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-
-  // /projects command
-  bot.command('projects', async (ctx) => {
-    const { getProjectRegistry } = await import('../core/project-registry.js');
-    const registry = getProjectRegistry();
-    const projects = registry.listProjects({ status: 'active', limit: 10 });
-
-    if (projects.length === 0) {
-      await ctx.reply('No projects found. Initialize a project with `orchestrate init`.');
-      return;
-    }
-
-    const list = projects
-      .map((p, i) => `${i + 1}. *${p.name}*${p.alias ? ` (${p.alias})` : ''}\n   ${p.path}`)
-      .join('\n\n');
-
-    await ctx.reply(
-      `📂 *Projects*\n\n${list}`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-
-  // Register callback-based handlers for init and paths
+  // Register callback-based handlers for init and paths (these use inline keyboards)
   registerInitHandlers(bot);
   registerPathsHandlers(bot);
+
+  // Route all text messages through the command router
+  bot.on('message:text', async (ctx) => {
+    const user = (ctx as any).authorizedUser;
+    if (!user) return;
+
+    const result = await routeCommand(ctx, user);
+
+    if (result) {
+      const options: any = {};
+      if (result.parseMode) options.parse_mode = result.parseMode;
+      if (result.keyboard) options.reply_markup = result.keyboard;
+
+      await ctx.reply(result.response, options);
+    }
+  });
 
   console.log('Starting Telegram bot...');
 

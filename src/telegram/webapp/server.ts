@@ -182,16 +182,8 @@ export class WebAppServer {
       this.app.use(express.static(this.staticDir));
 
       // SPA fallback - serve index.html for client-side routing
-      this.app.get('*', (req: Request, res: Response) => {
-        // Skip API routes
-        if (req.path.startsWith('/api/')) {
-          res.status(404).json({
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Endpoint not found' },
-          });
-          return;
-        }
-
+      // Using regex to avoid path-to-regexp 8.x issues with bare '*'
+      this.app.get(/^(?!\/api\/).*$/, (req: Request, res: Response) => {
         const indexPath = path.join(this.staticDir, 'index.html');
         if (existsSync(indexPath)) {
           res.sendFile(indexPath);

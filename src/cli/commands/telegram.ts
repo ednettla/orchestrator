@@ -423,6 +423,58 @@ async function listUsersCommand(): Promise<void> {
 }
 
 /**
+ * Show config in interactive mode
+ */
+async function showConfigInteractive(store: ReturnType<typeof getGlobalStore>): Promise<void> {
+  const config = store.getConfig();
+  const webappConfig = store.getWebAppConfig();
+
+  console.log(chalk.bold('\nTelegram Configuration\n'));
+  console.log(`${chalk.cyan('Bot Token:')} ${config.botToken ? chalk.green('configured') : chalk.red('not set')}`);
+  console.log(`${chalk.cyan('Notification Level:')} ${config.notificationLevel}`);
+  console.log();
+  console.log(chalk.bold('WebApp Settings'));
+  console.log(`${chalk.cyan('webapp_enabled:')} ${webappConfig.enabled}`);
+  console.log(`${chalk.cyan('webapp_port:')} ${webappConfig.port}`);
+  console.log(`${chalk.cyan('webapp_base_url:')} ${webappConfig.baseUrl ?? chalk.dim('not set')}`);
+  console.log();
+
+  const action = await select({
+    message: 'What would you like to do?',
+    choices: [
+      { value: 'enable-webapp', name: webappConfig.enabled ? 'Disable WebApp' : 'Enable WebApp' },
+      { value: 'set-port', name: 'Change WebApp port' },
+      { value: 'set-url', name: 'Set WebApp base URL' },
+      { value: 'back', name: 'Back to main menu' },
+    ],
+  });
+
+  switch (action) {
+    case 'enable-webapp':
+      store.setWebAppEnabled(!webappConfig.enabled);
+      console.log(chalk.green(`✓ webapp_enabled = ${!webappConfig.enabled}`));
+      break;
+    case 'set-port':
+      const portInput = await input({
+        message: 'WebApp port:',
+        default: String(webappConfig.port),
+        validate: (v) => /^\d+$/.test(v) ? true : 'Must be a number',
+      });
+      store.setWebAppPort(parseInt(portInput, 10));
+      console.log(chalk.green(`✓ webapp_port = ${portInput}`));
+      break;
+    case 'set-url':
+      const urlInput = await input({
+        message: 'WebApp base URL (or "null" to clear):',
+        default: webappConfig.baseUrl ?? '',
+      });
+      store.setWebAppBaseUrl(urlInput === 'null' || urlInput === '' ? null : urlInput);
+      console.log(chalk.green(`✓ webapp_base_url = ${urlInput || 'cleared'}`));
+      break;
+  }
+}
+
+/**
  * Interactive telegram management
  */
 export async function interactiveCommand(): Promise<void> {
@@ -452,6 +504,7 @@ export async function interactiveCommand(): Promise<void> {
         { value: 'add-user', name: 'Add user' },
         { value: 'remove-user', name: 'Remove user' },
         { value: 'list-users', name: 'List users' },
+        { value: 'config', name: 'View/edit config' },
         {
           value: 'setup-https',
           name: webappConfig.baseUrl?.startsWith('https://')
@@ -489,6 +542,9 @@ export async function interactiveCommand(): Promise<void> {
           break;
         case 'list-users':
           await listUsersCommand();
+          break;
+        case 'config':
+          await showConfigInteractive(store);
           break;
         case 'setup-https':
           await setupHttps();
