@@ -341,11 +341,6 @@ export class CloudServicesSetup {
     status: PrerequisiteStatus,
     config: CloudSetupConfig
   ): Promise<boolean> {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
     let allAuthenticated = true;
 
     // Handle GitHub auth
@@ -353,7 +348,7 @@ export class CloudServicesSetup {
       console.log();
       console.log(chalk.yellow('GitHub requires authentication via the GitHub CLI.'));
       console.log(chalk.dim('Run: gh auth login'));
-      const skip = await this.askYesNo(rl, 'Skip GitHub setup?');
+      const skip = await this.askYesNoSingle('Skip GitHub setup?');
       if (skip) {
         config.github = false;
       } else {
@@ -362,9 +357,9 @@ export class CloudServicesSetup {
     }
 
     // Handle Supabase auth
+    // Close readline before calling authenticate() to avoid conflicts
     if (config.supabase && !status.supabase.ready) {
-      const authenticate = await this.askYesNo(
-        rl,
+      const authenticate = await this.askYesNoSingle(
         '\nSupabase requires authentication. Authenticate now?'
       );
       if (authenticate) {
@@ -378,9 +373,9 @@ export class CloudServicesSetup {
     }
 
     // Handle Vercel auth
+    // Close readline before calling authenticate() to avoid conflicts
     if (config.vercel && !status.vercel.ready) {
-      const authenticate = await this.askYesNo(
-        rl,
+      const authenticate = await this.askYesNoSingle(
         '\nVercel requires authentication. Authenticate now?'
       );
       if (authenticate) {
@@ -392,8 +387,6 @@ export class CloudServicesSetup {
         config.vercel = false;
       }
     }
-
-    rl.close();
 
     // Check if anything is still selected
     if (!config.github && !config.supabase && !config.vercel) {
@@ -488,11 +481,28 @@ export class CloudServicesSetup {
   }
 
   /**
-   * Helper to ask yes/no questions
+   * Helper to ask yes/no questions with provided readline
    */
   private askYesNo(rl: ReturnType<typeof createInterface>, question: string): Promise<boolean> {
     return new Promise((resolve) => {
       rl.question(`${question} ${chalk.dim('(y/n)')} `, (answer) => {
+        resolve(answer.toLowerCase().startsWith('y'));
+      });
+    });
+  }
+
+  /**
+   * Helper to ask yes/no questions with its own readline (creates and closes)
+   * Use this when calling methods that create their own readline interfaces
+   */
+  private askYesNoSingle(question: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      rl.question(`${question} ${chalk.dim('(y/n)')} `, (answer) => {
+        rl.close();
         resolve(answer.toLowerCase().startsWith('y'));
       });
     });
