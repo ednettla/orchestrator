@@ -7,6 +7,7 @@ import { ConcurrentRunner } from '../../pipeline/concurrent-runner.js';
 import { AgentMonitor } from '../../agents/monitor.js';
 import { StreamingDisplay } from '../streaming-display.js';
 import { renderDashboard } from '../../ui/dashboard.js';
+import { spawnDaemon } from '../daemon.js';
 import type { Requirement } from '../../core/types.js';
 import type { StreamingOptions } from '../../agents/invoker.js';
 
@@ -15,6 +16,7 @@ interface RunOptions {
   sequential?: boolean;
   concurrency?: string;
   dashboard?: boolean;
+  background?: boolean;
 }
 
 export async function runCommand(
@@ -22,6 +24,28 @@ export async function runCommand(
   options: RunOptions
 ): Promise<void> {
   const projectPath = path.resolve(options.path);
+
+  // Handle background mode - spawn daemon and exit
+  if (options.background) {
+    console.log(chalk.cyan('Starting daemon in background...\n'));
+
+    const args = process.argv.slice(3); // Get args after 'run'
+    const result = spawnDaemon(projectPath, 'run', args);
+
+    if (result.success) {
+      console.log(chalk.green(`✓ Daemon started (PID ${result.pid})`));
+      console.log(chalk.dim('\nYou can safely close this terminal.'));
+      console.log(chalk.dim('Use these commands to manage the daemon:\n'));
+      console.log(chalk.dim('  orchestrate status    # Check daemon status'));
+      console.log(chalk.dim('  orchestrate logs -f   # Follow log output'));
+      console.log(chalk.dim('  orchestrate stop      # Stop the daemon\n'));
+    } else {
+      console.log(chalk.red(`✗ Failed to start daemon: ${result.error}`));
+      process.exit(1);
+    }
+    return;
+  }
+
   const maxConcurrency = parseInt(options.concurrency ?? '3', 10);
   const sequential = options.sequential ?? false;
   const useDashboard = options.dashboard ?? false;

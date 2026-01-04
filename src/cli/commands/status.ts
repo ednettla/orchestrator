@@ -1,6 +1,7 @@
 import path from 'node:path';
 import chalk from 'chalk';
 import { sessionManager, getTechStackDescription } from '../../core/session-manager.js';
+import { printDaemonStatus, getDaemonStatus } from '../daemon.js';
 import type { Task, Requirement } from '../../core/types.js';
 
 interface StatusOptions {
@@ -55,6 +56,15 @@ export async function statusCommand(options: StatusOptions): Promise<void> {
     } else {
       // Human-readable output
       console.log(chalk.bold('\n📊 Orchestrator - Session Status\n'));
+
+      // Daemon status (show first if running)
+      const daemonStatus = getDaemonStatus(projectPath);
+      if (daemonStatus.running) {
+        console.log(chalk.cyan('Background Daemon'));
+        console.log(chalk.dim('─'.repeat(50)));
+        printDaemonStatus(projectPath);
+        console.log();
+      }
 
       // Session info
       console.log(chalk.cyan('Session'));

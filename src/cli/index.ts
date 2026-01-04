@@ -19,6 +19,7 @@ import {
   mcpDisableCommand,
 } from './commands/mcp.js';
 import { designCommand } from './commands/design.js';
+import { stopDaemon, tailLogs, printDaemonStatus } from './daemon.js';
 
 const program = new Command();
 
@@ -105,6 +106,7 @@ program
   .option('--sequential', 'Run one at a time instead of concurrent')
   .option('--concurrency <n>', 'Max concurrent jobs', '3')
   .option('--dashboard', 'Show interactive dashboard with real-time status')
+  .option('-b, --background', 'Run as a background daemon (safe to close terminal)')
   .action(runCommand);
 
 program
@@ -123,6 +125,37 @@ program
   .option('-p, --path <path>', 'Project path', process.cwd())
   .option('--json', 'Output as JSON')
   .action(statusCommand);
+
+program
+  .command('logs')
+  .description('View daemon logs')
+  .option('-p, --path <path>', 'Project path', process.cwd())
+  .option('-n, --lines <n>', 'Number of lines to show', '50')
+  .option('-f, --follow', 'Follow log output (like tail -f)')
+  .action(async (opts) => {
+    const path = await import('node:path');
+    const projectPath = path.default.resolve(opts.path);
+    await tailLogs(projectPath, {
+      lines: parseInt(opts.lines, 10),
+      follow: opts.follow,
+    });
+  });
+
+program
+  .command('stop')
+  .description('Stop the background daemon')
+  .option('-p, --path <path>', 'Project path', process.cwd())
+  .action(async (opts) => {
+    const path = await import('node:path');
+    const chalk = await import('chalk');
+    const projectPath = path.default.resolve(opts.path);
+    const result = stopDaemon(projectPath);
+    if (result.success) {
+      console.log(chalk.default.green('✓ Daemon stopped'));
+    } else {
+      console.log(chalk.default.yellow(result.error ?? 'Failed to stop daemon'));
+    }
+  });
 
 // ============================================================================
 // Interactive Dashboard
@@ -146,6 +179,7 @@ program
   .option('--resume', 'Resume an existing plan instead of creating a new one')
   .option('--dashboard', 'Show interactive dashboard during execution')
   .option('--concurrency <n>', 'Max concurrent jobs', '3')
+  .option('-b, --background', 'Run as a background daemon (safe to close terminal)')
   .action(planCommand);
 
 // ============================================================================

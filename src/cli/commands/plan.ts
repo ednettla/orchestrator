@@ -14,6 +14,7 @@ import { StreamingDisplay } from '../streaming-display.js';
 import { AgentMonitor } from '../../agents/monitor.js';
 import { renderDashboard } from '../../ui/dashboard.js';
 import { createDesignController } from '../../design/design-controller.js';
+import { spawnDaemon } from '../daemon.js';
 import type { StreamingOptions } from '../../agents/invoker.js';
 
 interface PlanOptions {
@@ -21,10 +22,40 @@ interface PlanOptions {
   resume?: boolean;
   dashboard?: boolean;
   concurrency?: string;
+  background?: boolean;
 }
 
 export async function planCommand(goal: string | undefined, options: PlanOptions): Promise<void> {
   const projectPath = path.resolve(options.path);
+
+  // Handle background mode - spawn daemon and exit
+  if (options.background) {
+    // Background mode requires --resume with an approved plan
+    if (!options.resume) {
+      console.log(chalk.yellow('Background mode requires an approved plan.'));
+      console.log(chalk.dim('First create and approve a plan, then run:'));
+      console.log(chalk.dim('  orchestrate plan --resume --background\n'));
+      process.exit(1);
+    }
+
+    console.log(chalk.cyan('Starting daemon in background...\n'));
+
+    const args = process.argv.slice(3); // Get args after 'plan'
+    const result = spawnDaemon(projectPath, 'plan', args);
+
+    if (result.success) {
+      console.log(chalk.green(`✓ Daemon started (PID ${result.pid})`));
+      console.log(chalk.dim('\nYou can safely close this terminal.'));
+      console.log(chalk.dim('Use these commands to manage the daemon:\n'));
+      console.log(chalk.dim('  orchestrate status    # Check daemon status'));
+      console.log(chalk.dim('  orchestrate logs -f   # Follow log output'));
+      console.log(chalk.dim('  orchestrate stop      # Stop the daemon\n'));
+    } else {
+      console.log(chalk.red(`✗ Failed to start daemon: ${result.error}`));
+      process.exit(1);
+    }
+    return;
+  }
 
   console.log(chalk.bold('\n🎯 Project Planning\n'));
 
