@@ -575,6 +575,67 @@ export function registerTelegramCommand(program: Command): void {
     .description('Setup HTTPS with Let\'s Encrypt for Mini App')
     .action(setupHttps);
 
+  telegram
+    .command('config [key] [value]')
+    .description('View or set telegram config (webapp_enabled, webapp_port, webapp_base_url)')
+    .action(async (key?: string, value?: string) => {
+      const store = getGlobalStore();
+
+      if (!key) {
+        // Show all config
+        const config = store.getConfig();
+        const webappConfig = store.getWebAppConfig();
+
+        console.log(chalk.bold('\nTelegram Configuration\n'));
+        console.log(`${chalk.cyan('Bot Token:')} ${config.botToken ? chalk.green('configured') : chalk.red('not set')}`);
+        console.log(`${chalk.cyan('Notification Level:')} ${config.notificationLevel}`);
+        console.log();
+        console.log(chalk.bold('WebApp Settings'));
+        console.log(`${chalk.cyan('webapp_enabled:')} ${webappConfig.enabled}`);
+        console.log(`${chalk.cyan('webapp_port:')} ${webappConfig.port}`);
+        console.log(`${chalk.cyan('webapp_base_url:')} ${webappConfig.baseUrl ?? chalk.dim('not set')}`);
+        console.log();
+        return;
+      }
+
+      if (!value) {
+        // Show single key
+        const webappConfig = store.getWebAppConfig();
+        switch (key) {
+          case 'webapp_enabled':
+            console.log(webappConfig.enabled);
+            break;
+          case 'webapp_port':
+            console.log(webappConfig.port);
+            break;
+          case 'webapp_base_url':
+            console.log(webappConfig.baseUrl ?? '');
+            break;
+          default:
+            console.error(chalk.red(`Unknown key: ${key}`));
+        }
+        return;
+      }
+
+      // Set value
+      switch (key) {
+        case 'webapp_enabled':
+          store.setWebAppEnabled(value === 'true');
+          console.log(chalk.green(`✓ webapp_enabled = ${value}`));
+          break;
+        case 'webapp_port':
+          store.setWebAppPort(parseInt(value, 10));
+          console.log(chalk.green(`✓ webapp_port = ${value}`));
+          break;
+        case 'webapp_base_url':
+          store.setWebAppBaseUrl(value === 'null' ? null : value);
+          console.log(chalk.green(`✓ webapp_base_url = ${value}`));
+          break;
+        default:
+          console.error(chalk.red(`Unknown key: ${key}`));
+      }
+    });
+
   // Default to interactive if no subcommand
   telegram.action(async () => {
     await interactiveCommand();
