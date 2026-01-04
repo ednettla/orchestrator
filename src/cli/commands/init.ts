@@ -7,6 +7,7 @@ import { detectTechStack, formatDetectionResult } from '../../core/tech-stack-de
 import { setupVitest } from '../../core/vitest-setup.js';
 import { createClaudeMdGenerator } from '../../core/claude-md-generator.js';
 import { CloudServicesSetup } from '../../core/cloud-setup/index.js';
+import { spawnDaemon } from '../daemon.js';
 import type { TechStack } from '../../core/types.js';
 import { DEFAULT_TECH_STACK } from '../../core/types.js';
 
@@ -181,9 +182,59 @@ export async function initCommand(options: InitOptions): Promise<void> {
       }
     }
 
+    // Offer to start building immediately (interactive only)
+    if (options.interactive) {
+      console.log();
+      const startNow = await confirm({
+        message: 'Would you like to start building now?',
+        default: true,
+      });
+
+      if (startNow) {
+        const goal = await input({
+          message: 'What would you like to build?',
+          validate: (value) => value.length > 0 || 'Please describe what you want to build',
+        });
+
+        const runInBackground = await confirm({
+          message: 'Run in background? (you can close the terminal)',
+          default: true,
+        });
+
+        sessionManager.close();
+
+        if (runInBackground) {
+          console.log(chalk.cyan('\n🚀 Starting build in background...\n'));
+
+          const result = spawnDaemon(projectPath, 'plan', [goal, '-p', projectPath]);
+
+          if (result.success) {
+            console.log(chalk.green(`✓ Build started (PID ${result.pid})`));
+            console.log(chalk.dim('\nYou can safely close this terminal.'));
+            console.log(chalk.dim('Use these commands to manage the build:\n'));
+            console.log(chalk.dim('  orchestrate status    # Check progress'));
+            console.log(chalk.dim('  orchestrate logs -f   # Follow log output'));
+            console.log(chalk.dim('  orchestrate stop      # Stop the build\n'));
+          } else {
+            console.log(chalk.red(`✗ Failed to start: ${result.error}`));
+            console.log(chalk.dim('\nYou can start manually with:'));
+            console.log(chalk.white(`  orchestrate plan "${goal}" --background\n`));
+          }
+        } else {
+          // Run in foreground - just print the command to run
+          console.log(chalk.cyan('\n🚀 Starting build...\n'));
+          console.log(chalk.dim('Run this command to start:'));
+          console.log(chalk.white(`  orchestrate plan "${goal}"\n`));
+        }
+
+        return;
+      }
+    }
+
     console.log(chalk.cyan('\n📝 Next steps:'));
     console.log(chalk.dim('  Add requirements with'), chalk.white('orchestrate add "your requirement"'));
     console.log(chalk.dim('  Or run directly with'), chalk.white('orchestrate run "your requirement"'));
+    console.log(chalk.dim('  Or plan a full project with'), chalk.white('orchestrate plan "Build a ..."'));
 
     sessionManager.close();
   } catch (error) {
