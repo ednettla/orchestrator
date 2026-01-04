@@ -19,6 +19,7 @@ import {
   mcpDisableCommand,
 } from './commands/mcp.js';
 import { designCommand } from './commands/design.js';
+import { mainMenuCommand } from './commands/menu.js';
 import { stopDaemon, tailLogs, printDaemonStatus } from './daemon.js';
 import {
   getCurrentVersion,
@@ -299,5 +300,14 @@ mcpCmd
     const parentOpts = cmd.parent?.opts() as { path: string };
     await mcpDisableCommand(name, { path: parentOpts.path, global: opts.global });
   });
+
+// ============================================================================
+// Default Action (Interactive Menu)
+// ============================================================================
+
+// Show interactive menu when no command is provided
+program.action(async () => {
+  await mainMenuCommand({ path: process.cwd() });
+});
 
 program.parse();
