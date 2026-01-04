@@ -2,6 +2,12 @@
 
 # Orchestrator Installation Script
 # This script installs the orchestrator CLI tool globally
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/ednettla/orchestrator/main/install.sh | bash
+#
+# Or from a cloned repo:
+#   ./install.sh
 
 set -e
 
@@ -11,6 +17,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+REPO_URL="https://github.com/ednettla/orchestrator.git"
+INSTALL_DIR="${HOME}/.orchestrator-cli"
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -56,21 +65,34 @@ fi
 echo -e "${GREEN}✓ git installed${NC}"
 
 # -----------------------------------------------------------------------------
+# Determine Source Directory
+# -----------------------------------------------------------------------------
+
+# Check if we're running from a cloned repo or via curl
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/package.json" ]; then
+    echo ""
+    echo -e "${YELLOW}Installing from local directory: ${SCRIPT_DIR}${NC}"
+    SOURCE_DIR="$SCRIPT_DIR"
+else
+    echo ""
+    echo -e "${YELLOW}Cloning repository...${NC}"
+
+    # Create temp directory for cloning
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+
+    git clone --depth 1 "$REPO_URL" "$TEMP_DIR"
+    SOURCE_DIR="$TEMP_DIR"
+fi
+
+# -----------------------------------------------------------------------------
 # Installation Directory
 # -----------------------------------------------------------------------------
 
-INSTALL_DIR="${HOME}/.orchestrator-cli"
-
 echo ""
 echo -e "${YELLOW}Installation directory: ${INSTALL_DIR}${NC}"
-
-# Get source directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [ ! -f "$SCRIPT_DIR/package.json" ]; then
-    echo -e "${RED}Error: Please run this script from the orchestrator directory${NC}"
-    exit 1
-fi
 
 # Create or update installation directory
 if [ -d "$INSTALL_DIR" ]; then
@@ -83,16 +105,16 @@ mkdir -p "$INSTALL_DIR"
 
 # Copy source files (excluding node_modules and dist to do fresh install)
 if command -v rsync &> /dev/null; then
-    rsync -a --exclude 'node_modules' --exclude 'dist' --exclude '.git' "$SCRIPT_DIR/" "$INSTALL_DIR/"
+    rsync -a --exclude 'node_modules' --exclude 'dist' --exclude '.git' "$SOURCE_DIR/" "$INSTALL_DIR/"
 else
     # Fallback without rsync
-    cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/package.json" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/tsconfig.json" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/README.md" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/install.sh" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
+    cp -r "$SOURCE_DIR/src" "$INSTALL_DIR/"
+    cp "$SOURCE_DIR/package.json" "$INSTALL_DIR/"
+    cp "$SOURCE_DIR/package-lock.json" "$INSTALL_DIR/" 2>/dev/null || true
+    cp "$SOURCE_DIR/tsconfig.json" "$INSTALL_DIR/"
+    cp "$SOURCE_DIR/README.md" "$INSTALL_DIR/" 2>/dev/null || true
+    cp "$SOURCE_DIR/install.sh" "$INSTALL_DIR/" 2>/dev/null || true
+    cp "$SOURCE_DIR/uninstall.sh" "$INSTALL_DIR/" 2>/dev/null || true
 fi
 
 cd "$INSTALL_DIR"

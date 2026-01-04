@@ -15,31 +15,24 @@ A multi-agent CLI tool for building full-stack web applications using Claude Cod
 
 ## Installation
 
-### Quick Install (Recommended)
-
-Run the installation script which handles everything automatically:
+### One-Line Install (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/orchestrator.git
-cd orchestrator
-
-# Run the installer
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/ednettla/orchestrator/main/install.sh | bash
 ```
 
-The installer will:
-- Check prerequisites (Node.js 20+, npm, git)
+This will:
+- Clone the repository
 - Install dependencies and build
 - Link `orchestrate` command globally
-- Guide you through Claude Code authentication
-- Provide Chrome extension setup instructions
+- Install Claude Code CLI
+- Guide you through setup
 
 ### Manual Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/orchestrator.git
+git clone https://github.com/ednettla/orchestrator.git
 cd orchestrator
 
 # Install dependencies
