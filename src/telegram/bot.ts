@@ -2,14 +2,18 @@
  * Telegram Bot Setup
  *
  * Main bot entry point using grammy.
+ * Also starts the WebApp Express server for Mini App support.
  *
  * @module telegram/bot
  */
 
 import { Bot } from 'grammy';
 import { getGlobalStore } from '../core/global-store.js';
+import { createWebAppServer, type WebAppServer } from './webapp/server.js';
+import { registerInitHandlers, registerPathsHandlers } from './handlers/index.js';
 
 let bot: Bot | null = null;
+let webappServer: WebAppServer | null = null;
 
 /**
  * Start the Telegram bot
@@ -97,20 +101,62 @@ export async function startBot(): Promise<void> {
     );
   });
 
+  // Register callback-based handlers for init and paths
+  registerInitHandlers(bot);
+  registerPathsHandlers(bot);
+
   console.log('Starting Telegram bot...');
+
+  // Start WebApp server if enabled
+  const webappConfig = store.getWebAppConfig();
+  if (webappConfig.enabled) {
+    try {
+      webappServer = createWebAppServer({ port: webappConfig.port });
+      await webappServer.start();
+      console.log(`WebApp server started on port ${webappConfig.port}`);
+    } catch (error) {
+      console.error('Failed to start WebApp server:', error);
+      // Continue anyway - bot can work without webapp
+    }
+  }
+
   await bot.start({
     onStart: (botInfo) => {
       console.log(`Bot started: @${botInfo.username}`);
+      if (webappConfig.enabled && webappServer) {
+        const baseUrl = webappConfig.baseUrl ?? `http://localhost:${webappConfig.port}`;
+        console.log(`WebApp available at: ${baseUrl}`);
+      }
     },
   });
 }
 
 /**
- * Stop the Telegram bot
+ * Stop the Telegram bot and WebApp server
  */
 export async function stopBot(): Promise<void> {
+  // Stop WebApp server first
+  if (webappServer) {
+    try {
+      await webappServer.stop();
+      webappServer = null;
+      console.log('WebApp server stopped');
+    } catch (error) {
+      console.error('Error stopping WebApp server:', error);
+    }
+  }
+
+  // Stop bot
   if (bot) {
     await bot.stop();
     bot = null;
+    console.log('Telegram bot stopped');
   }
+}
+
+/**
+ * Get the WebApp server instance (for use by handlers)
+ */
+export function getWebAppServer(): WebAppServer | null {
+  return webappServer;
 }

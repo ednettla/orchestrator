@@ -276,6 +276,191 @@ interface Requirement {
 }
 
 /**
+ * Get a single requirement by ID
+ */
+export async function getRequirement(
+  projectPath: string,
+  requirementId: string
+): Promise<Requirement | null> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return null;
+  }
+
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath, { readonly: true });
+
+    const row = db.prepare(`
+      SELECT id, title, raw_input, status, priority, created_at
+      FROM requirements
+      WHERE id = ?
+    `).get(requirementId) as {
+      id: string;
+      title: string;
+      raw_input: string;
+      status: string;
+      priority: number;
+      created_at: string;
+    } | undefined;
+
+    db.close();
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      priority: row.priority,
+      createdAt: row.created_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Update requirement text
+ */
+export async function updateRequirementText(
+  projectPath: string,
+  requirementId: string,
+  newText: string
+): Promise<CommandResult> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, output: '', error: 'Project not initialized' };
+  }
+
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    const result = db.prepare(`
+      UPDATE requirements
+      SET title = ?, raw_input = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(newText, newText, requirementId);
+
+    db.close();
+
+    if (result.changes === 0) {
+      return { success: false, output: '', error: 'Requirement not found' };
+    }
+
+    return { success: true, output: 'Updated' };
+  } catch (error) {
+    return {
+      success: false,
+      output: '',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Update requirement priority
+ */
+export async function updateRequirementPriority(
+  projectPath: string,
+  requirementId: string,
+  priority: number
+): Promise<CommandResult> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, output: '', error: 'Project not initialized' };
+  }
+
+  // Validate priority range
+  if (priority < 0 || priority > 10) {
+    return { success: false, output: '', error: 'Priority must be between 0 and 10' };
+  }
+
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    const result = db.prepare(`
+      UPDATE requirements
+      SET priority = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(priority, requirementId);
+
+    db.close();
+
+    if (result.changes === 0) {
+      return { success: false, output: '', error: 'Requirement not found' };
+    }
+
+    return { success: true, output: 'Updated' };
+  } catch (error) {
+    return {
+      success: false,
+      output: '',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Delete requirement
+ */
+export async function deleteRequirement(
+  projectPath: string,
+  requirementId: string
+): Promise<CommandResult> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, output: '', error: 'Project not initialized' };
+  }
+
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    // First check if requirement exists and is not in_progress
+    const req = db.prepare(`
+      SELECT status FROM requirements WHERE id = ?
+    `).get(requirementId) as { status: string } | undefined;
+
+    if (!req) {
+      db.close();
+      return { success: false, output: '', error: 'Requirement not found' };
+    }
+
+    if (req.status === 'in_progress') {
+      db.close();
+      return { success: false, output: '', error: 'Cannot delete in-progress requirement' };
+    }
+
+    // Delete associated tasks first
+    db.prepare(`DELETE FROM tasks WHERE requirement_id = ?`).run(requirementId);
+
+    // Delete the requirement
+    const result = db.prepare(`DELETE FROM requirements WHERE id = ?`).run(requirementId);
+
+    db.close();
+
+    if (result.changes === 0) {
+      return { success: false, output: '', error: 'Requirement not found' };
+    }
+
+    return { success: true, output: 'Deleted' };
+  } catch (error) {
+    return {
+      success: false,
+      output: '',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
  * Get requirements list
  */
 export async function getRequirements(projectPath: string): Promise<Requirement[]> {
@@ -365,4 +550,343 @@ function formatRelativeTime(isoString: string): string {
   if (diffDays < 7) return `${diffDays}d ago`;
 
   return date.toLocaleDateString();
+}
+
+// ============================================================================
+// WebApp API Bridge Functions
+// ============================================================================
+
+interface ApiResult {
+  success: boolean;
+  error?: string;
+  jobId?: string;
+  project?: Record<string, unknown>;
+  remainingQuestions?: number;
+}
+
+/**
+ * Initialize a project from allowed path (for WebApp API)
+ */
+export async function initProjectFromApi(options: {
+  path: string;
+  name?: string;
+  techStack?: Record<string, string>;
+}): Promise<ApiResult> {
+  try {
+    const args = [];
+    if (options.name) {
+      args.push('--name', options.name);
+    }
+
+    const result = await executeCommand(options.path, 'init', args);
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? result.output };
+    }
+
+    return {
+      success: true,
+      project: {
+        path: options.path,
+        name: options.name ?? path.basename(options.path),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Run a single requirement (for WebApp API)
+ */
+export async function runRequirementFromApi(
+  projectPath: string,
+  requirementId: string
+): Promise<ApiResult> {
+  try {
+    const result = await executeCommand(projectPath, 'run', [
+      '--requirement',
+      requirementId,
+      '--background',
+    ]);
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? result.output };
+    }
+
+    return {
+      success: true,
+      jobId: `run-${requirementId}-${Date.now()}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Start planning process (for WebApp API)
+ */
+export async function startPlanFromApi(projectPath: string): Promise<ApiResult> {
+  try {
+    const result = await executeCommand(projectPath, 'plan', ['--background']);
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? result.output };
+    }
+
+    return {
+      success: true,
+      jobId: `plan-${Date.now()}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Answer a plan question (for WebApp API)
+ */
+export async function answerPlanQuestionFromApi(
+  projectPath: string,
+  questionId: string,
+  answer: string
+): Promise<ApiResult> {
+  try {
+    // Store answer in the database
+    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+    if (!existsSync(dbPath)) {
+      return { success: false, error: 'Project not initialized' };
+    }
+
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    // Update the plan artifact with the answer
+    const session = db.prepare(`
+      SELECT id FROM sessions
+      WHERE project_path = ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(projectPath) as { id: string } | undefined;
+
+    if (!session) {
+      db.close();
+      return { success: false, error: 'No active session' };
+    }
+
+    const artifact = db.prepare(`
+      SELECT content FROM artifacts
+      WHERE session_id = ? AND type = 'plan'
+    `).get(session.id) as { content: string } | undefined;
+
+    if (!artifact) {
+      db.close();
+      return { success: false, error: 'No active plan' };
+    }
+
+    const planData = JSON.parse(artifact.content);
+    const questions = planData.clarifyingQuestions ?? [];
+
+    // Find and answer the question
+    let answered = false;
+    for (const q of questions) {
+      if (q.id === questionId && !q.answered) {
+        q.answered = true;
+        q.answer = answer;
+        answered = true;
+        break;
+      }
+    }
+
+    if (!answered) {
+      db.close();
+      return { success: false, error: 'Question not found or already answered' };
+    }
+
+    // Update the plan
+    planData.clarifyingQuestions = questions;
+    db.prepare(`
+      UPDATE artifacts
+      SET content = ?, updated_at = datetime('now')
+      WHERE session_id = ? AND type = 'plan'
+    `).run(JSON.stringify(planData), session.id);
+
+    db.close();
+
+    const remaining = questions.filter((q: { answered?: boolean }) => !q.answered).length;
+
+    return {
+      success: true,
+      remainingQuestions: remaining,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Approve a plan (for WebApp API)
+ */
+export async function approvePlanFromApi(projectPath: string): Promise<ApiResult> {
+  try {
+    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+    if (!existsSync(dbPath)) {
+      return { success: false, error: 'Project not initialized' };
+    }
+
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    // Update session status to approved
+    const result = db.prepare(`
+      UPDATE sessions
+      SET status = 'approved', updated_at = datetime('now')
+      WHERE project_path = ?
+      AND status = 'pending_approval'
+    `).run(projectPath);
+
+    db.close();
+
+    if (result.changes === 0) {
+      return { success: false, error: 'No pending plan to approve' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Reject a plan (for WebApp API)
+ */
+export async function rejectPlanFromApi(
+  projectPath: string,
+  reason?: string
+): Promise<ApiResult> {
+  try {
+    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+    if (!existsSync(dbPath)) {
+      return { success: false, error: 'Project not initialized' };
+    }
+
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(dbPath);
+
+    // Update session status to idle (rejected)
+    const result = db.prepare(`
+      UPDATE sessions
+      SET status = 'idle', updated_at = datetime('now')
+      WHERE project_path = ?
+      AND status = 'pending_approval'
+    `).run(projectPath);
+
+    // Optionally store rejection reason in plan artifact
+    if (reason) {
+      const session = db.prepare(`
+        SELECT id FROM sessions
+        WHERE project_path = ?
+        ORDER BY updated_at DESC LIMIT 1
+      `).get(projectPath) as { id: string } | undefined;
+
+      if (session) {
+        const artifact = db.prepare(`
+          SELECT content FROM artifacts
+          WHERE session_id = ? AND type = 'plan'
+        `).get(session.id) as { content: string } | undefined;
+
+        if (artifact) {
+          const planData = JSON.parse(artifact.content);
+          planData.rejectionReason = reason;
+          planData.status = 'rejected';
+
+          db.prepare(`
+            UPDATE artifacts
+            SET content = ?, updated_at = datetime('now')
+            WHERE session_id = ? AND type = 'plan'
+          `).run(JSON.stringify(planData), session.id);
+        }
+      }
+    }
+
+    db.close();
+
+    if (result.changes === 0) {
+      return { success: false, error: 'No pending plan to reject' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+// ============================================================================
+// Design System API Functions
+// ============================================================================
+
+/**
+ * Run design audit (for WebApp API and Telegram)
+ */
+export async function runDesignAuditFromApi(projectPath: string): Promise<ApiResult> {
+  try {
+    const result = await executeCommand(projectPath, 'design', ['audit', '--background']);
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? result.output };
+    }
+
+    return {
+      success: true,
+      jobId: `design-audit-${Date.now()}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Generate design system tokens (for WebApp API and Telegram)
+ */
+export async function generateDesignSystemFromApi(projectPath: string): Promise<ApiResult> {
+  try {
+    const result = await executeCommand(projectPath, 'design', ['generate', '--background']);
+
+    if (!result.success) {
+      return { success: false, error: result.error ?? result.output };
+    }
+
+    return {
+      success: true,
+      jobId: `design-generate-${Date.now()}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
 }

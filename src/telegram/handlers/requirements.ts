@@ -1,7 +1,7 @@
 /**
  * Requirements Handlers
  *
- * Handle add and reqs commands.
+ * Handle add, edit, priority, delete, and reqs commands.
  *
  * @module telegram/handlers/requirements
  */
@@ -9,7 +9,14 @@
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { requirementsListKeyboard } from '../keyboards.js';
-import { addRequirement, getRequirements } from '../project-bridge.js';
+import {
+  addRequirement,
+  getRequirements,
+  getRequirement,
+  updateRequirementText,
+  updateRequirementPriority,
+  deleteRequirement,
+} from '../project-bridge.js';
 
 /**
  * Handle add command
@@ -67,6 +74,250 @@ export async function addHandler(ctx: CommandContext): Promise<CommandResult> {
       `Use \`/${project.name} run\` to start execution.`,
     parseMode: 'Markdown',
   };
+}
+
+/**
+ * Handle edit command
+ */
+export async function editHandler(ctx: CommandContext): Promise<CommandResult> {
+  const { projectName, args, quotedArg } = ctx;
+
+  if (!projectName) {
+    return {
+      success: false,
+      response: 'Project name required.',
+    };
+  }
+
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    return {
+      success: false,
+      response: `Project not found: \`${projectName}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Parse: edit <id> "new text"
+  const reqId = args[0];
+  const newText = quotedArg ?? args.slice(1).join(' ');
+
+  if (!reqId || !newText) {
+    return {
+      success: false,
+      response:
+        `Usage: \`/${project.name} edit <id> "new text"\`\n\n` +
+        `Example:\n` +
+        `\`/${project.name} edit abc123 "Updated requirement text"\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Check if requirement exists
+  const req = await getRequirement(project.path, reqId);
+  if (!req) {
+    return {
+      success: false,
+      response: `Requirement not found: \`${reqId}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Update the requirement
+  const result = await updateRequirementText(project.path, reqId, newText);
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to update requirement:\n${result.error ?? 'Unknown error'}`,
+    };
+  }
+
+  return {
+    success: true,
+    response:
+      `✅ *Requirement Updated*\n\n` +
+      `ID: \`${reqId}\`\n` +
+      `New text: _${newText}_`,
+    parseMode: 'Markdown',
+  };
+}
+
+/**
+ * Handle priority command
+ */
+export async function priorityHandler(ctx: CommandContext): Promise<CommandResult> {
+  const { projectName, args } = ctx;
+
+  if (!projectName) {
+    return {
+      success: false,
+      response: 'Project name required.',
+    };
+  }
+
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    return {
+      success: false,
+      response: `Project not found: \`${projectName}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Parse: priority <id> <0-10>
+  const reqId = args[0];
+  const priorityStr = args[1];
+
+  if (!reqId || !priorityStr) {
+    return {
+      success: false,
+      response:
+        `Usage: \`/${project.name} priority <id> <0-10>\`\n\n` +
+        `Priority levels:\n` +
+        `  0-3: Low\n` +
+        `  4-6: Medium\n` +
+        `  7-9: High\n` +
+        `  10: Critical`,
+      parseMode: 'Markdown',
+    };
+  }
+
+  const priority = parseInt(priorityStr, 10);
+  if (isNaN(priority) || priority < 0 || priority > 10) {
+    return {
+      success: false,
+      response: `Invalid priority: \`${priorityStr}\`. Must be 0-10.`,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Check if requirement exists
+  const req = await getRequirement(project.path, reqId);
+  if (!req) {
+    return {
+      success: false,
+      response: `Requirement not found: \`${reqId}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Update the priority
+  const result = await updateRequirementPriority(project.path, reqId, priority);
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to update priority:\n${result.error ?? 'Unknown error'}`,
+    };
+  }
+
+  const priorityLabel = getPriorityLabel(priority);
+
+  return {
+    success: true,
+    response:
+      `✅ *Priority Updated*\n\n` +
+      `ID: \`${reqId}\`\n` +
+      `Priority: ${priority} (${priorityLabel})`,
+    parseMode: 'Markdown',
+  };
+}
+
+/**
+ * Handle delete command
+ */
+export async function deleteHandler(ctx: CommandContext): Promise<CommandResult> {
+  const { projectName, args } = ctx;
+
+  if (!projectName) {
+    return {
+      success: false,
+      response: 'Project name required.',
+    };
+  }
+
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    return {
+      success: false,
+      response: `Project not found: \`${projectName}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Parse: delete <id> [--force]
+  const reqId = args[0];
+  const force = args.includes('--force') || args.includes('-f');
+
+  if (!reqId) {
+    return {
+      success: false,
+      response:
+        `Usage: \`/${project.name} delete <id>\`\n\n` +
+        `Add \`--force\` to skip confirmation:\n` +
+        `\`/${project.name} delete <id> --force\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Check if requirement exists
+  const req = await getRequirement(project.path, reqId);
+  if (!req) {
+    return {
+      success: false,
+      response: `Requirement not found: \`${reqId}\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // If not forced, show confirmation message
+  if (!force) {
+    return {
+      success: true,
+      response:
+        `⚠️ *Delete Requirement?*\n\n` +
+        `ID: \`${reqId}\`\n` +
+        `Text: _${truncate(req.title, 50)}_\n\n` +
+        `To confirm, run:\n` +
+        `\`/${project.name} delete ${reqId} --force\``,
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Delete the requirement
+  const result = await deleteRequirement(project.path, reqId);
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to delete requirement:\n${result.error ?? 'Unknown error'}`,
+    };
+  }
+
+  return {
+    success: true,
+    response:
+      `✅ *Requirement Deleted*\n\n` +
+      `ID: \`${reqId}\``,
+    parseMode: 'Markdown',
+  };
+}
+
+/**
+ * Get priority label
+ */
+function getPriorityLabel(priority: number): string {
+  if (priority <= 3) return 'Low';
+  if (priority <= 6) return 'Medium';
+  if (priority <= 9) return 'High';
+  return 'Critical';
 }
 
 /**

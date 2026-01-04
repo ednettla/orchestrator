@@ -12,12 +12,17 @@ import type { CommandDefinition } from '../types.js';
 // Import individual handlers
 import { startHandler, helpHandler } from './start.js';
 import { projectsHandler, switchHandler, newProjectHandler } from './project.js';
-import { planHandler, approveHandler, rejectHandler } from './plan.js';
+import { planHandler, approveHandler, rejectHandler, answerHandler, questionsHandler } from './plan.js';
 import { runHandler, stopHandler } from './run.js';
-import { addHandler, reqsHandler } from './requirements.js';
+import { addHandler, editHandler, priorityHandler, deleteHandler, reqsHandler } from './requirements.js';
 import { configHandler, mcpHandler, secretsHandler } from './config.js';
 import { logsHandler } from './logs.js';
 import { statusHandler } from './status.js';
+import { designHandler } from './design.js';
+
+// Export callback-based handler registration functions
+export { registerInitHandlers } from './init.js';
+export { registerPathsHandlers } from './paths.js';
 
 // ============================================================================
 // Command Definitions
@@ -100,6 +105,22 @@ const commandDefinitions: CommandDefinition[] = [
     projectScoped: true,
   },
   {
+    name: 'answer',
+    description: 'Answer a plan question',
+    usage: '/<project> answer <id> "answer"',
+    handler: answerHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'questions',
+    description: 'Show pending plan questions',
+    usage: '/<project> questions',
+    handler: questionsHandler,
+    requiredRole: 'viewer',
+    projectScoped: true,
+  },
+  {
     name: 'run',
     description: 'Run pending requirements',
     usage: '/<project> run',
@@ -120,6 +141,30 @@ const commandDefinitions: CommandDefinition[] = [
     description: 'Add a new requirement',
     usage: '/<project> add "requirement"',
     handler: addHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'edit',
+    description: 'Edit requirement text',
+    usage: '/<project> edit <id> "new text"',
+    handler: editHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'priority',
+    description: 'Set requirement priority',
+    usage: '/<project> priority <id> <0-10>',
+    handler: priorityHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'delete',
+    description: 'Delete a requirement',
+    usage: '/<project> delete <id>',
+    handler: deleteHandler,
     requiredRole: 'operator',
     projectScoped: true,
   },
@@ -160,6 +205,14 @@ const commandDefinitions: CommandDefinition[] = [
     description: 'List secrets (no values)',
     usage: '/<project> secrets [env]',
     handler: secretsHandler,
+    requiredRole: 'operator',
+    projectScoped: true,
+  },
+  {
+    name: 'design',
+    description: 'Manage design system',
+    usage: '/<project> design [audit|generate]',
+    handler: designHandler,
     requiredRole: 'operator',
     projectScoped: true,
   },

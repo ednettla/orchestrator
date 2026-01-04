@@ -1,0 +1,224 @@
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  margin: 0 0 var(--spacing-md);
+}
+
+/* Status Card */
+.statusCard {
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.statusHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.statusLabel {
+  font-size: var(--font-size-sm);
+  color: var(--hint-color);
+}
+
+.statusValue {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.statusValue.active {
+  color: var(--status-completed);
+}
+
+.statusValue.idle {
+  color: var(--hint-color);
+}
+
+.runningIndicator {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--status-in-progress);
+}
+
+.pulse {
+  width: 8px;
+  height: 8px;
+  background: var(--status-in-progress);
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+/* Stats Grid */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.statCard {
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-md);
+}
+
+.statValue {
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  margin-bottom: var(--spacing-xs);
+}
+
+.statLabel {
+  font-size: var(--font-size-sm);
+  color: var(--hint-color);
+  margin-bottom: var(--spacing-sm);
+}
+
+.statBreakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+}
+
+.statBreakdown .pending {
+  color: var(--status-pending);
+}
+
+.statBreakdown .inProgress {
+  color: var(--status-in-progress);
+}
+
+.statBreakdown .completed {
+  color: var(--status-completed);
+}
+
+/* Plan Card */
+.planCard {
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.planHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-base);
+}
+
+.planStatus {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--border-radius-sm);
+  text-transform: capitalize;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.planStatus.pending_approval {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--status-pending);
+}
+
+.planStatus.approved {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--status-completed);
+}
+
+.planAlert {
+  margin: var(--spacing-sm) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--status-pending);
+}
+
+/* Activity Section */
+.activitySection {
+  margin-top: var(--spacing-lg);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  margin: 0 0 var(--spacing-md);
+}
+
+.activityList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.activityItem {
+  display: flex;
+  gap: var(--spacing-sm);
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.activityIcon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.activityContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.activityDescription {
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--spacing-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activityTime {
+  font-size: var(--font-size-xs);
+  color: var(--hint-color);
+}
+
+.noActivity {
+  text-align: center;
+  color: var(--hint-color);
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-lg);
+}
+
+/* States */
+.loading {
+  text-align: center;
+  padding: var(--spacing-xl);
+  color: var(--hint-color);
+}
+
+.error {
+  text-align: center;
+  padding: var(--spacing-xl);
+  color: var(--status-failed);
+}

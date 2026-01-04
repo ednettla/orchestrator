@@ -51,6 +51,20 @@ export interface TelegramConfig {
   webhookUrl: string | null;
 }
 
+export interface WebAppConfig {
+  enabled: boolean;
+  port: number;
+  baseUrl: string | null;
+}
+
+export interface AllowedPath {
+  id: string;
+  path: string;
+  description: string | null;
+  addedBy: number;
+  createdAt: Date;
+}
+
 // ============================================================================
 // Role Hierarchy
 // ============================================================================
@@ -116,9 +130,19 @@ export class GlobalStore {
         value TEXT NOT NULL
       );
 
+      -- Allowed paths for remote project initialization
+      CREATE TABLE IF NOT EXISTS allowed_paths (
+        id TEXT PRIMARY KEY,
+        path TEXT UNIQUE NOT NULL,
+        description TEXT,
+        added_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       -- Create indexes
       CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON authorized_users(telegram_id);
       CREATE INDEX IF NOT EXISTS idx_conversation_telegram_id ON conversation_state(telegram_id);
+      CREATE INDEX IF NOT EXISTS idx_allowed_paths_path ON allowed_paths(path);
     `);
   }
 
@@ -423,6 +447,153 @@ export class GlobalStore {
   }
 
   // ==========================================================================
+  // Allowed Paths Management
+  // ==========================================================================
+
+  /**
+   * Add an allowed path for project initialization
+   */
+  addAllowedPath(
+    pathStr: string,
+    addedBy: number,
+    description?: string
+  ): AllowedPath {
+    const id = nanoid();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO allowed_paths (id, path, description, added_by)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    stmt.run(id, pathStr, description ?? null, addedBy);
+
+    return this.getAllowedPath(id)!;
+  }
+
+  /**
+   * Get an allowed path by ID
+   */
+  getAllowedPath(id: string): AllowedPath | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM allowed_paths WHERE id = ?
+    `);
+
+    const row = stmt.get(id) as DatabaseAllowedPathRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAllowedPath(row);
+  }
+
+  /**
+   * Get an allowed path by path string
+   */
+  getAllowedPathByPath(pathStr: string): AllowedPath | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM allowed_paths WHERE path = ?
+    `);
+
+    const row = stmt.get(pathStr) as DatabaseAllowedPathRow | undefined;
+    if (!row) return null;
+
+    return this.rowToAllowedPath(row);
+  }
+
+  /**
+   * List all allowed paths
+   */
+  listAllowedPaths(): AllowedPath[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM allowed_paths ORDER BY created_at DESC
+    `);
+
+    const rows = stmt.all() as DatabaseAllowedPathRow[];
+    return rows.map((row) => this.rowToAllowedPath(row));
+  }
+
+  /**
+   * Remove an allowed path by ID
+   */
+  removeAllowedPath(id: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM allowed_paths WHERE id = ?
+    `);
+
+    const result = stmt.run(id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Remove an allowed path by path string
+   */
+  removeAllowedPathByPath(pathStr: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM allowed_paths WHERE path = ?
+    `);
+
+    const result = stmt.run(pathStr);
+    return result.changes > 0;
+  }
+
+  // ==========================================================================
+  // WebApp Configuration
+  // ==========================================================================
+
+  /**
+   * Get WebApp configuration
+   */
+  getWebAppConfig(): WebAppConfig {
+    const stmt = this.db.prepare(`SELECT key, value FROM telegram_config WHERE key LIKE 'webapp_%'`);
+    const rows = stmt.all() as Array<{ key: string; value: string }>;
+
+    const config: WebAppConfig = {
+      enabled: false,
+      port: 3847,
+      baseUrl: null,
+    };
+
+    for (const row of rows) {
+      switch (row.key) {
+        case 'webapp_enabled':
+          config.enabled = row.value === 'true';
+          break;
+        case 'webapp_port':
+          config.port = parseInt(row.value, 10) || 3847;
+          break;
+        case 'webapp_base_url':
+          config.baseUrl = row.value || null;
+          break;
+      }
+    }
+
+    return config;
+  }
+
+  /**
+   * Set WebApp enabled status
+   */
+  setWebAppEnabled(enabled: boolean): void {
+    this.setConfigValue('webapp_enabled', enabled ? 'true' : 'false');
+  }
+
+  /**
+   * Set WebApp port
+   */
+  setWebAppPort(port: number): void {
+    this.setConfigValue('webapp_port', port.toString());
+  }
+
+  /**
+   * Set WebApp base URL
+   */
+  setWebAppBaseUrl(url: string | null): void {
+    if (url) {
+      this.setConfigValue('webapp_base_url', url);
+    } else {
+      this.deleteConfigValue('webapp_base_url');
+    }
+  }
+
+  // ==========================================================================
   // Utility Methods
   // ==========================================================================
 
@@ -459,6 +630,19 @@ export class GlobalStore {
   }
 
   /**
+   * Convert database row to AllowedPath
+   */
+  private rowToAllowedPath(row: DatabaseAllowedPathRow): AllowedPath {
+    return {
+      id: row.id,
+      path: row.path,
+      description: row.description,
+      addedBy: row.added_by,
+      createdAt: new Date(row.created_at),
+    };
+  }
+
+  /**
    * Close database connection
    */
   close(): void {
@@ -488,6 +672,14 @@ interface DatabaseConversationRow {
   pending_confirmation_data: string | null;
   created_at: string;
   expires_at: string;
+}
+
+interface DatabaseAllowedPathRow {
+  id: string;
+  path: string;
+  description: string | null;
+  added_by: number;
+  created_at: string;
 }
 
 // ============================================================================
