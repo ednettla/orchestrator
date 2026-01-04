@@ -7,10 +7,9 @@ import {
   presentFullPlan,
   presentRequirements,
   presentRequirementDetails,
-  presentArchitecturalDecisions,
   presentQuestions,
 } from '../../planning/plan-presenter.js';
-import { getDaemonStatus, stopDaemon, tailLogs } from '../daemon.js';
+import { getDaemonStatus, stopDaemon, tailLogs, spawnDaemon } from '../daemon.js';
 import { checkForUpdates, updateToLatest, getCurrentVersion } from '../updater.js';
 import { initCommand } from './init.js';
 import { planCommand } from './plan.js';
@@ -19,7 +18,11 @@ import { statusCommand } from './status.js';
 import { addCommand } from './add.js';
 import { listCommand } from './list.js';
 import { configInteractive } from './config.js';
+import { mcpConfigManager } from '../../core/mcp-config-manager.js';
+import { credentialManager } from '../../core/credential-manager.js';
+import { authFlowManager } from '../../core/auth-flow-manager.js';
 import type { Plan, PlannedRequirement } from '../../core/types.js';
+import type { MCPServerConfig, MCPTransportType, MCPAuthType } from '../../core/mcp-types.js';
 
 interface MenuContext {
   hasProject: boolean;
@@ -31,7 +34,6 @@ interface MenuContext {
   inProgressCount: number;
   completedCount: number;
   failedCount: number;
-  // Plan info
   activePlan: Plan | null;
   sessionId: string | null;
 }
@@ -65,7 +67,6 @@ async function getMenuContext(projectPath: string): Promise<MenuContext> {
     context.projectName = session.projectName;
     context.sessionId = session.id;
 
-    // Get requirement counts
     const store = sessionManager.getStore();
     const requirements = store.getRequirementsBySession(session.id);
 
@@ -86,16 +87,18 @@ async function getMenuContext(projectPath: string): Promise<MenuContext> {
       }
     }
 
-    // Get active plan
     context.activePlan = store.getActivePlan(session.id);
-
     sessionManager.close();
   } catch {
-    // No project - that's fine
     sessionManager.close();
   }
 
   return context;
+}
+
+async function refreshContext(context: MenuContext): Promise<void> {
+  const fresh = await getMenuContext(context.projectPath);
+  Object.assign(context, fresh);
 }
 
 function printBanner(): void {
@@ -112,18 +115,10 @@ function printContextInfo(context: MenuContext): void {
     console.log(chalk.dim('  Project:'), chalk.white(context.projectName));
 
     const statusParts: string[] = [];
-    if (context.pendingCount > 0) {
-      statusParts.push(chalk.yellow(`${context.pendingCount} pending`));
-    }
-    if (context.inProgressCount > 0) {
-      statusParts.push(chalk.blue(`${context.inProgressCount} in progress`));
-    }
-    if (context.completedCount > 0) {
-      statusParts.push(chalk.green(`${context.completedCount} completed`));
-    }
-    if (context.failedCount > 0) {
-      statusParts.push(chalk.red(`${context.failedCount} failed`));
-    }
+    if (context.pendingCount > 0) statusParts.push(chalk.yellow(`${context.pendingCount} pending`));
+    if (context.inProgressCount > 0) statusParts.push(chalk.blue(`${context.inProgressCount} in progress`));
+    if (context.completedCount > 0) statusParts.push(chalk.green(`${context.completedCount} completed`));
+    if (context.failedCount > 0) statusParts.push(chalk.red(`${context.failedCount} failed`));
 
     if (statusParts.length > 0) {
       console.log(chalk.dim('  Requirements:'), statusParts.join(chalk.dim(' | ')));
@@ -135,7 +130,7 @@ function printContextInfo(context: MenuContext): void {
 
     if (context.activePlan) {
       const statusColor = getPlanStatusColor(context.activePlan.status);
-      console.log(chalk.dim('  Plan:'), statusColor(context.activePlan.status), chalk.dim('-'), truncateGoal(context.activePlan.highLevelGoal, 40));
+      console.log(chalk.dim('  Plan:'), statusColor(context.activePlan.status), chalk.dim('-'), truncateText(context.activePlan.highLevelGoal, 40));
     }
   } else {
     console.log(chalk.dim('  No project initialized in current directory'));
@@ -162,9 +157,9 @@ function getPlanStatusColor(status: string): (text: string) => string {
   }
 }
 
-function truncateGoal(goal: string, maxLen: number): string {
-  if (goal.length <= maxLen) return goal;
-  return goal.substring(0, maxLen - 3) + '...';
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.substring(0, maxLen - 3) + '...';
 }
 
 interface MenuChoice {
@@ -227,14 +222,9 @@ function buildMainMenuChoices(context: MenuContext): MenuChoice[] {
 
   if (context.hasDaemon) {
     choices.push({
-      name: 'View daemon logs',
-      value: 'logs',
-      description: 'Follow background process output',
-    });
-    choices.push({
-      name: chalk.yellow('Stop daemon'),
-      value: 'stop',
-      description: 'Stop background process',
+      name: 'Daemon controls',
+      value: 'daemon',
+      description: 'View logs, stop background process',
     });
   }
 
@@ -258,209 +248,605 @@ function buildMainMenuChoices(context: MenuContext): MenuChoice[] {
   return choices;
 }
 
+// ============================================================================
+// Requirements Menu
+// ============================================================================
+
 async function showRequirementsMenu(context: MenuContext): Promise<void> {
-  const action = await select({
-    message: 'Manage requirements:',
-    choices: [
+  while (true) {
+    // Refresh counts
+    await refreshContext(context);
+
+    const choices = [
       { name: 'Add a new requirement', value: 'add' },
       { name: 'List all requirements', value: 'list' },
-      { name: chalk.dim('Back to main menu'), value: 'back' },
-    ],
-  });
+    ];
 
-  switch (action) {
-    case 'add': {
-      const requirement = await input({
-        message: 'Enter requirement:',
-        validate: (value) => value.length > 0 || 'Requirement cannot be empty',
-      });
-      await addCommand(requirement, {
-        path: context.projectPath,
-        priority: '0',
-      });
-      break;
+    if (context.pendingCount > 0) {
+      choices.push({ name: `Run pending (${context.pendingCount})`, value: 'run' });
     }
-    case 'list':
-      await listCommand({
-        path: context.projectPath,
-        status: 'all',
-        json: false,
-      });
-      break;
-    case 'back':
-      return;
-  }
 
-  // After action, show menu again
-  await showRequirementsMenu(context);
+    choices.push({ name: chalk.dim('Back to main menu'), value: 'back' });
+
+    const action = await select({
+      message: 'Manage requirements:',
+      choices,
+    });
+
+    if (action === 'back') return;
+
+    console.log();
+
+    switch (action) {
+      case 'add': {
+        const requirement = await input({
+          message: 'Enter requirement:',
+          validate: (value) => value.length > 0 || 'Requirement cannot be empty',
+        });
+        await addCommand(requirement, {
+          path: context.projectPath,
+          priority: '0',
+        });
+        await refreshContext(context);
+        break;
+      }
+      case 'list':
+        await listCommand({
+          path: context.projectPath,
+          status: 'all',
+          json: false,
+        });
+        await input({ message: chalk.dim('Press Enter to continue...') });
+        break;
+      case 'run':
+        await showRunMenu(context);
+        return; // Return to main menu after run
+    }
+  }
 }
 
-async function showConfigMenu(context: MenuContext): Promise<void> {
-  const action = await select({
-    message: 'Configuration:',
+// ============================================================================
+// Run Menu
+// ============================================================================
+
+async function showRunMenu(context: MenuContext): Promise<void> {
+  console.log();
+  console.log(chalk.cyan.bold('  Run Options'));
+  console.log(chalk.dim('  ' + '─'.repeat(50)));
+
+  const runMode = await select({
+    message: 'How would you like to run?',
     choices: [
-      { name: 'Project settings', value: 'project', disabled: !context.hasProject },
-      { name: 'MCP servers', value: 'mcp' },
-      { name: chalk.dim('Back to main menu'), value: 'back' },
+      { name: 'Foreground (watch progress)', value: 'foreground', description: 'See live output' },
+      { name: 'Background (daemon)', value: 'background', description: 'Run detached, safe to close terminal' },
+      { name: chalk.dim('Cancel'), value: 'cancel' },
     ],
   });
 
-  switch (action) {
-    case 'project':
-      await configInteractive({ path: context.projectPath });
-      break;
-    case 'mcp':
-      console.log(chalk.dim('\nUse these commands for MCP management:'));
-      console.log(chalk.white('  orchestrate mcp list     '), chalk.dim('# List configured servers'));
-      console.log(chalk.white('  orchestrate mcp add <n>  '), chalk.dim('# Add a server'));
-      console.log(chalk.white('  orchestrate mcp auth <n> '), chalk.dim('# Authorize a server'));
-      console.log();
-      break;
-    case 'back':
-      return;
+  if (runMode === 'cancel') return;
+
+  const concurrency = await select({
+    message: 'Concurrency level:',
+    choices: [
+      { name: '1 (sequential)', value: '1' },
+      { name: '3 (default)', value: '3' },
+      { name: '5 (parallel)', value: '5' },
+      { name: 'Custom...', value: 'custom' },
+    ],
+  });
+
+  let concurrencyValue = concurrency;
+  if (concurrency === 'custom') {
+    concurrencyValue = await input({
+      message: 'Enter concurrency (1-10):',
+      default: '3',
+      validate: (v) => {
+        const n = parseInt(v, 10);
+        return (n >= 1 && n <= 10) || 'Must be between 1 and 10';
+      },
+    });
   }
+
+  console.log();
+
+  if (runMode === 'background') {
+    const result = spawnDaemon(context.projectPath, 'run', [
+      '-p', context.projectPath,
+      '--concurrency', concurrencyValue,
+    ]);
+
+    if (result.success) {
+      console.log(chalk.green(`✓ Started in background (PID ${result.pid})`));
+      console.log(chalk.dim('\nYou can safely close this terminal.'));
+      console.log(chalk.dim('Use "Daemon controls" from main menu to view logs or stop.\n'));
+      context.hasDaemon = true;
+      context.daemonPid = result.pid;
+    } else {
+      console.log(chalk.red(`✗ Failed to start: ${result.error}`));
+    }
+    await input({ message: chalk.dim('Press Enter to continue...') });
+  } else {
+    // Foreground run
+    console.log(chalk.cyan('Running requirements...\n'));
+    await runCommand(undefined, {
+      path: context.projectPath,
+      sequential: concurrencyValue === '1',
+      concurrency: concurrencyValue,
+      dashboard: true,
+      background: false,
+    });
+    console.log();
+    await refreshContext(context);
+    await input({ message: chalk.dim('Press Enter to continue...') });
+  }
+}
+
+// ============================================================================
+// Daemon Menu
+// ============================================================================
+
+async function showDaemonMenu(context: MenuContext): Promise<void> {
+  while (context.hasDaemon) {
+    await refreshContext(context);
+
+    if (!context.hasDaemon) {
+      console.log(chalk.dim('Daemon is no longer running.'));
+      return;
+    }
+
+    const action = await select({
+      message: `Daemon controls (PID ${context.daemonPid}):`,
+      choices: [
+        { name: 'View recent logs', value: 'logs' },
+        { name: 'Follow logs (live)', value: 'follow' },
+        { name: chalk.yellow('Stop daemon'), value: 'stop' },
+        { name: chalk.dim('Back to main menu'), value: 'back' },
+      ],
+    });
+
+    if (action === 'back') return;
+
+    console.log();
+
+    switch (action) {
+      case 'logs':
+        await tailLogs(context.projectPath, { lines: 30, follow: false });
+        await input({ message: chalk.dim('Press Enter to continue...') });
+        break;
+      case 'follow':
+        console.log(chalk.dim('Following logs (Ctrl+C to stop)...\n'));
+        await tailLogs(context.projectPath, { lines: 20, follow: true });
+        break;
+      case 'stop': {
+        const confirmStop = await confirm({
+          message: 'Stop the background daemon?',
+          default: true,
+        });
+        if (confirmStop) {
+          const result = stopDaemon(context.projectPath);
+          if (result.success) {
+            console.log(chalk.green('✓ Daemon stopped'));
+            context.hasDaemon = false;
+          } else {
+            console.log(chalk.yellow(result.error ?? 'Failed to stop daemon'));
+          }
+        }
+        break;
+      }
+    }
+  }
+}
+
+// ============================================================================
+// Config Menu
+// ============================================================================
+
+async function showConfigMenu(context: MenuContext): Promise<void> {
+  while (true) {
+    const action = await select({
+      message: 'Configuration:',
+      choices: [
+        { name: 'Project settings', value: 'project', disabled: !context.hasProject ? '(no project)' : false },
+        { name: 'MCP servers', value: 'mcp' },
+        { name: chalk.dim('Back to main menu'), value: 'back' },
+      ],
+    });
+
+    if (action === 'back') return;
+
+    console.log();
+
+    switch (action) {
+      case 'project':
+        await configInteractive({ path: context.projectPath });
+        break;
+      case 'mcp':
+        await showMcpMenu(context);
+        break;
+    }
+  }
+}
+
+// ============================================================================
+// MCP Menu (fully interactive)
+// ============================================================================
+
+async function showMcpMenu(context: MenuContext): Promise<void> {
+  while (true) {
+    console.log();
+    console.log(chalk.cyan.bold('  MCP Server Configuration'));
+    console.log(chalk.dim('  ' + '─'.repeat(50)));
+
+    // Load and display servers
+    await credentialManager.initialize();
+    const config = await mcpConfigManager.getMergedConfig(context.projectPath);
+    const servers = Object.entries(config.mcpServers);
+
+    if (servers.length === 0) {
+      console.log(chalk.dim('  No MCP servers configured.'));
+    } else {
+      for (const [name, server] of servers) {
+        const enabled = server.enabled !== false;
+        const authRequired = server.requiresAuth ?? false;
+
+        let status = enabled ? chalk.green('●') : chalk.dim('○');
+        let authStatus = '';
+
+        if (authRequired) {
+          const hasCredentials = await credentialManager.hasCredential(
+            name,
+            server.scope === 'project' ? context.projectPath : undefined
+          );
+          authStatus = hasCredentials ? chalk.green(' ✓') : chalk.yellow(' ⚠');
+        }
+
+        console.log(`  ${status} ${name}${authStatus}  ${chalk.dim(server.type)}`);
+      }
+    }
+    console.log();
+
+    const choices = [
+      { name: 'Add a server', value: 'add' },
+    ];
+
+    if (servers.length > 0) {
+      choices.push({ name: 'Authorize a server', value: 'auth' });
+      choices.push({ name: 'Enable/disable a server', value: 'toggle' });
+      choices.push({ name: 'Remove a server', value: 'remove' });
+    }
+
+    choices.push({ name: chalk.dim('Back'), value: 'back' });
+
+    const action = await select({
+      message: 'MCP actions:',
+      choices,
+    });
+
+    if (action === 'back') return;
+
+    console.log();
+
+    switch (action) {
+      case 'add':
+        await addMcpServer(context);
+        break;
+      case 'auth':
+        await authMcpServer(context);
+        break;
+      case 'toggle':
+        await toggleMcpServer(context);
+        break;
+      case 'remove':
+        await removeMcpServer(context);
+        break;
+    }
+  }
+}
+
+async function addMcpServer(context: MenuContext): Promise<void> {
+  const name = await input({
+    message: 'Server name:',
+    validate: (v) => v.length > 0 || 'Name is required',
+  });
+
+  const transportType = await select({
+    message: 'Transport type:',
+    choices: [
+      { name: 'stdio (local process)', value: 'stdio' },
+      { name: 'http (REST API)', value: 'http' },
+      { name: 'sse (Server-Sent Events)', value: 'sse' },
+    ],
+  }) as MCPTransportType;
+
+  const serverConfig: MCPServerConfig = {
+    type: transportType,
+    enabled: true,
+  };
+
+  if (transportType === 'stdio') {
+    serverConfig.command = await input({
+      message: 'Command to run:',
+      default: 'npx',
+    });
+    const argsStr = await input({
+      message: 'Arguments (space-separated):',
+    });
+    if (argsStr) {
+      serverConfig.args = argsStr.split(' ').filter(Boolean);
+    }
+  } else {
+    serverConfig.url = await input({
+      message: 'Server URL:',
+      validate: (v) => v.length > 0 || 'URL is required',
+    });
+  }
+
+  const requiresAuth = await confirm({
+    message: 'Requires authentication?',
+    default: false,
+  });
+
+  if (requiresAuth) {
+    serverConfig.requiresAuth = true;
+    serverConfig.authType = await select({
+      message: 'Auth type:',
+      choices: [
+        { name: 'API Key', value: 'api_key' },
+        { name: 'OAuth', value: 'oauth' },
+        { name: 'Token', value: 'token' },
+      ],
+    }) as MCPAuthType;
+  }
+
+  const description = await input({
+    message: 'Description (optional):',
+  });
+  if (description) {
+    serverConfig.description = description;
+  }
+
+  const scope = await select({
+    message: 'Scope:',
+    choices: [
+      { name: 'This project only', value: 'project' },
+      { name: 'Global (all projects)', value: 'global' },
+    ],
+  });
+
+  await mcpConfigManager.addServer(
+    name,
+    serverConfig,
+    scope === 'project' ? context.projectPath : undefined
+  );
+
+  console.log(chalk.green(`\n✓ Server "${name}" added!`));
+
+  if (requiresAuth) {
+    const authNow = await confirm({
+      message: 'Authorize now?',
+      default: true,
+    });
+    if (authNow) {
+      await doMcpAuth(name, serverConfig, context);
+    }
+  }
+}
+
+async function authMcpServer(context: MenuContext): Promise<void> {
+  const config = await mcpConfigManager.getMergedConfig(context.projectPath);
+  const servers = Object.entries(config.mcpServers).filter(([, s]) => s.requiresAuth);
+
+  if (servers.length === 0) {
+    console.log(chalk.dim('No servers require authentication.'));
+    return;
+  }
+
+  const serverName = await select({
+    message: 'Select server to authorize:',
+    choices: servers.map(([name]) => ({ name, value: name }))
+      .concat([{ name: chalk.dim('Cancel'), value: '' }]),
+  });
+
+  if (!serverName) return;
+
+  const serverConfig = config.mcpServers[serverName]!;
+  await doMcpAuth(serverName, serverConfig, context);
+}
+
+async function doMcpAuth(name: string, serverConfig: MCPServerConfig, context: MenuContext): Promise<void> {
+  try {
+    console.log(chalk.cyan(`\nStarting ${serverConfig.authType ?? 'token'} authorization flow...`));
+
+    const credential = await authFlowManager.authorize(name, serverConfig, context.projectPath);
+
+    await credentialManager.setCredential(
+      name,
+      credential,
+      serverConfig.scope === 'project' ? context.projectPath : undefined
+    );
+
+    console.log(chalk.green(`✓ Server "${name}" authorized!`));
+  } catch (error) {
+    console.log(chalk.red(`✗ Authorization failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
+  }
+}
+
+async function toggleMcpServer(context: MenuContext): Promise<void> {
+  const config = await mcpConfigManager.getMergedConfig(context.projectPath);
+  const servers = Object.entries(config.mcpServers);
+
+  const serverName = await select({
+    message: 'Select server:',
+    choices: servers.map(([name, s]) => ({
+      name: `${s.enabled !== false ? chalk.green('●') : chalk.dim('○')} ${name}`,
+      value: name,
+    })).concat([{ name: chalk.dim('Cancel'), value: '' }]),
+  });
+
+  if (!serverName) return;
+
+  const server = config.mcpServers[serverName]!;
+  const currentlyEnabled = server.enabled !== false;
+
+  const newState = await select({
+    message: `Server "${serverName}" is ${currentlyEnabled ? 'enabled' : 'disabled'}:`,
+    choices: [
+      { name: 'Enable', value: true, disabled: currentlyEnabled ? 'Already enabled' : false },
+      { name: 'Disable', value: false, disabled: !currentlyEnabled ? 'Already disabled' : false },
+    ],
+  });
+
+  await mcpConfigManager.setServerEnabled(serverName, newState, context.projectPath);
+  console.log(chalk.green(`✓ Server "${serverName}" ${newState ? 'enabled' : 'disabled'}`));
+}
+
+async function removeMcpServer(context: MenuContext): Promise<void> {
+  const config = await mcpConfigManager.getMergedConfig(context.projectPath);
+  const servers = Object.keys(config.mcpServers);
+
+  const serverName = await select({
+    message: 'Select server to remove:',
+    choices: servers.map((name) => ({ name, value: name }))
+      .concat([{ name: chalk.dim('Cancel'), value: '' }]),
+  });
+
+  if (!serverName) return;
+
+  const confirmRemove = await confirm({
+    message: `Remove "${serverName}"? This cannot be undone.`,
+    default: false,
+  });
+
+  if (!confirmRemove) return;
+
+  await credentialManager.removeCredential(serverName, context.projectPath);
+  await mcpConfigManager.removeServer(serverName, context.projectPath);
+
+  console.log(chalk.green(`✓ Server "${serverName}" removed`));
 }
 
 // ============================================================================
 // Plan Menu
 // ============================================================================
 
-async function showPlanMenu(context: MenuContext): Promise<'back' | 'exit'> {
-  const plan = context.activePlan;
-
-  if (!plan) {
+async function showPlanMenu(context: MenuContext): Promise<void> {
+  if (!context.activePlan) {
     // No active plan - offer to create one
     const goal = await input({
       message: 'What would you like to build?',
       validate: (value) => value.length > 0 || 'Please describe your goal',
     });
 
+    console.log(chalk.cyan('\nCreating plan...\n'));
     await planCommand(goal, {
       path: context.projectPath,
       dashboard: false,
       concurrency: '3',
     });
-    return 'exit';
+
+    await refreshContext(context);
+    return;
   }
 
-  // Show plan status and build menu choices
-  console.log();
-  console.log(chalk.cyan.bold('  Current Plan'));
-  console.log(chalk.dim('  ' + '─'.repeat(50)));
-  console.log(chalk.dim('  Goal:'), plan.highLevelGoal);
-  console.log(chalk.dim('  Status:'), getPlanStatusColor(plan.status)(plan.status));
-  console.log(chalk.dim('  Requirements:'), plan.requirements.length);
-  console.log();
+  while (context.activePlan) {
+    const plan = context.activePlan;
 
-  const choices: Array<{ name: string; value: string; disabled?: boolean }> = [];
+    console.log();
+    console.log(chalk.cyan.bold('  Current Plan'));
+    console.log(chalk.dim('  ' + '─'.repeat(50)));
+    console.log(chalk.dim('  Goal:'), plan.highLevelGoal);
+    console.log(chalk.dim('  Status:'), getPlanStatusColor(plan.status)(plan.status));
+    console.log(chalk.dim('  Requirements:'), plan.requirements.length);
+    console.log();
 
-  // View options
-  choices.push({ name: 'View full plan', value: 'view' });
-  choices.push({ name: 'View requirements', value: 'view_reqs' });
-  choices.push({ name: 'View questions & answers', value: 'view_questions' });
+    const choices: Array<{ name: string; value: string; disabled?: boolean | string }> = [];
 
-  // Edit options (only for plans not yet executing)
-  const canEdit = ['drafting', 'questioning', 'pending_approval', 'approved'].includes(plan.status);
-  choices.push({ name: 'Edit requirements', value: 'edit_reqs', disabled: !canEdit });
-  choices.push({ name: 'Edit questions', value: 'edit_questions', disabled: !canEdit || plan.questions.length === 0 });
+    // View options
+    choices.push({ name: 'View full plan', value: 'view' });
+    choices.push({ name: 'View requirements', value: 'view_reqs' });
+    choices.push({ name: 'View questions & answers', value: 'view_questions' });
 
-  // Action options based on status
-  if (plan.status === 'pending_approval') {
-    choices.push({ name: chalk.green('Approve and execute'), value: 'approve' });
-  } else if (plan.status === 'approved') {
-    choices.push({ name: chalk.green('Execute plan'), value: 'execute' });
-  } else if (plan.status === 'drafting' || plan.status === 'questioning') {
-    choices.push({ name: 'Continue plan creation', value: 'continue' });
+    // Edit options
+    const canEdit = ['drafting', 'questioning', 'pending_approval', 'approved'].includes(plan.status);
+    choices.push({ name: 'Edit requirements', value: 'edit_reqs', disabled: !canEdit ? 'Plan is executing' : false });
+    choices.push({ name: 'Edit questions', value: 'edit_questions', disabled: (!canEdit || plan.questions.length === 0) ? 'Not available' : false });
+
+    // Action options based on status
+    if (plan.status === 'pending_approval') {
+      choices.push({ name: chalk.green('Approve and execute'), value: 'approve' });
+    } else if (plan.status === 'approved') {
+      choices.push({ name: chalk.green('Execute plan'), value: 'execute' });
+    } else if (plan.status === 'drafting' || plan.status === 'questioning') {
+      choices.push({ name: 'Continue plan creation', value: 'continue' });
+    }
+
+    const canReject = !['executing', 'completed'].includes(plan.status);
+    choices.push({ name: chalk.red('Reject plan'), value: 'reject', disabled: !canReject ? 'Cannot reject' : false });
+    choices.push({ name: chalk.dim('Back to main menu'), value: 'back' });
+
+    const action = await select({
+      message: 'Plan actions:',
+      choices,
+    });
+
+    if (action === 'back') return;
+
+    console.log();
+
+    switch (action) {
+      case 'view':
+        presentFullPlan(plan);
+        await input({ message: chalk.dim('Press Enter to continue...') });
+        break;
+
+      case 'view_reqs':
+        presentRequirements(plan.requirements, plan.implementationOrder);
+        presentRequirementDetails(plan.requirements);
+        await input({ message: chalk.dim('Press Enter to continue...') });
+        break;
+
+      case 'view_questions':
+        presentQuestions(plan.questions);
+        await input({ message: chalk.dim('Press Enter to continue...') });
+        break;
+
+      case 'edit_reqs':
+        await editRequirements(context);
+        break;
+
+      case 'edit_questions':
+        await editQuestions(context);
+        break;
+
+      case 'approve':
+        await approvePlan(context);
+        await refreshContext(context);
+        break;
+
+      case 'execute':
+        await executePlan(context);
+        await refreshContext(context);
+        break;
+
+      case 'continue':
+        await planCommand(undefined, {
+          path: context.projectPath,
+          resume: true,
+          dashboard: false,
+          concurrency: '3',
+        });
+        await refreshContext(context);
+        break;
+
+      case 'reject':
+        await rejectPlan(context);
+        await refreshContext(context);
+        return; // Return to main menu after rejecting
+    }
+
+    // Refresh plan state
+    await refreshContext(context);
   }
-
-  choices.push({ name: chalk.red('Reject plan'), value: 'reject', disabled: plan.status === 'executing' || plan.status === 'completed' });
-  choices.push({ name: chalk.dim('Back to main menu'), value: 'back' });
-
-  const action = await select({
-    message: 'Plan actions:',
-    choices,
-  });
-
-  console.log();
-
-  switch (action) {
-    case 'view':
-      await viewFullPlan(context);
-      break;
-
-    case 'view_reqs':
-      await viewRequirements(context);
-      break;
-
-    case 'view_questions':
-      await viewQuestions(context);
-      break;
-
-    case 'edit_reqs':
-      await editRequirements(context);
-      break;
-
-    case 'edit_questions':
-      await editQuestions(context);
-      break;
-
-    case 'approve':
-      await approvePlan(context);
-      return 'exit';
-
-    case 'execute':
-      await executePlan(context);
-      return 'exit';
-
-    case 'continue':
-      await planCommand(undefined, {
-        path: context.projectPath,
-        resume: true,
-        dashboard: false,
-        concurrency: '3',
-      });
-      return 'exit';
-
-    case 'reject':
-      await rejectPlan(context);
-      return 'back';
-
-    case 'back':
-      return 'back';
-  }
-
-  // After action, show plan menu again
-  return await showPlanMenu(context);
-}
-
-async function viewFullPlan(context: MenuContext): Promise<void> {
-  if (!context.activePlan) return;
-
-  await sessionManager.initialize(context.projectPath);
-  await sessionManager.resumeSession(context.projectPath);
-
-  presentFullPlan(context.activePlan);
-
-  sessionManager.close();
-
-  await input({ message: chalk.dim('Press Enter to continue...') });
-}
-
-async function viewRequirements(context: MenuContext): Promise<void> {
-  if (!context.activePlan) return;
-
-  presentRequirements(context.activePlan.requirements, context.activePlan.implementationOrder);
-  presentRequirementDetails(context.activePlan.requirements);
-
-  await input({ message: chalk.dim('Press Enter to continue...') });
-}
-
-async function viewQuestions(context: MenuContext): Promise<void> {
-  if (!context.activePlan) return;
-
-  presentQuestions(context.activePlan.questions);
-
-  await input({ message: chalk.dim('Press Enter to continue...') });
 }
 
 async function editRequirements(context: MenuContext): Promise<void> {
@@ -473,23 +859,20 @@ async function editRequirements(context: MenuContext): Promise<void> {
     console.log(chalk.cyan.bold('  Edit Requirements'));
     console.log(chalk.dim('  ' + '─'.repeat(50)));
 
-    // Show requirements list
     plan.requirements.forEach((req, i) => {
       console.log(`  ${chalk.bold((i + 1).toString().padStart(2))}. ${req.title}`);
     });
     console.log();
 
-    const choices = [
-      { name: 'Edit a requirement', value: 'edit' },
-      { name: 'Reorder requirements', value: 'reorder' },
-      { name: 'Remove a requirement', value: 'remove' },
-      { name: 'Add a new requirement', value: 'add' },
-      { name: chalk.dim('Done editing'), value: 'done' },
-    ];
-
     const action = await select({
       message: 'What would you like to do?',
-      choices,
+      choices: [
+        { name: 'Edit a requirement', value: 'edit' },
+        { name: 'Reorder requirements', value: 'reorder' },
+        { name: 'Remove a requirement', value: 'remove' },
+        { name: 'Add a new requirement', value: 'add' },
+        { name: chalk.dim('Done editing'), value: 'done' },
+      ],
     });
 
     if (action === 'done') break;
@@ -564,8 +947,6 @@ async function editRequirements(context: MenuContext): Promise<void> {
     }
 
     sessionManager.close();
-
-    // Refresh context
     context.activePlan = plan;
   }
 }
@@ -595,19 +976,11 @@ async function editSingleRequirement(req: PlannedRequirement): Promise<PlannedRe
 
   switch (field) {
     case 'title':
-      req.title = await input({
-        message: 'New title:',
-        default: req.title,
-      });
+      req.title = await input({ message: 'New title:', default: req.title });
       break;
-
     case 'description':
-      req.description = await editor({
-        message: 'Edit description (opens editor):',
-        default: req.description,
-      });
+      req.description = await editor({ message: 'Edit description:', default: req.description });
       break;
-
     case 'complexity':
       req.estimatedComplexity = await select({
         message: 'Complexity:',
@@ -619,7 +992,6 @@ async function editSingleRequirement(req: PlannedRequirement): Promise<PlannedRe
         default: req.estimatedComplexity,
       });
       break;
-
     case 'notes':
       const notesStr = await editor({
         message: 'Edit technical notes (one per line):',
@@ -638,9 +1010,7 @@ async function createNewRequirement(existingCount: number): Promise<PlannedRequi
     validate: (v) => v.length > 0 || 'Title is required',
   });
 
-  const description = await input({
-    message: 'Description:',
-  });
+  const description = await input({ message: 'Description:' });
 
   const complexity = await select({
     message: 'Estimated complexity:',
@@ -675,25 +1045,21 @@ async function editQuestions(context: MenuContext): Promise<void> {
     console.log(chalk.cyan.bold('  Edit Question Answers'));
     console.log(chalk.dim('  ' + '─'.repeat(50)));
 
-    // Show questions with answers
     plan.questions.forEach((q, i) => {
       const answered = q.answer ? chalk.green('✓') : chalk.dim('○');
-      console.log(`  ${answered} ${chalk.bold((i + 1).toString())}. ${q.question}`);
+      console.log(`  ${answered} ${chalk.bold((i + 1).toString())}. ${truncateText(q.question, 50)}`);
       if (q.answer) {
-        console.log(chalk.dim(`     → ${q.answer}`));
+        console.log(chalk.dim(`     → ${truncateText(q.answer, 45)}`));
       }
     });
     console.log();
 
     const choices = plan.questions.map((q, i) => ({
-      name: `${i + 1}. ${truncateGoal(q.question, 50)}`,
+      name: `${i + 1}. ${truncateText(q.question, 50)}`,
       value: i,
     })).concat([{ name: chalk.dim('Done editing'), value: -1 }]);
 
-    const qIndex = await select({
-      message: 'Select question to edit:',
-      choices,
-    });
+    const qIndex = await select({ message: 'Select question to edit:', choices });
 
     if (qIndex === -1) break;
 
@@ -704,8 +1070,8 @@ async function editQuestions(context: MenuContext): Promise<void> {
     if (question.context) {
       console.log(chalk.dim('Context:'), question.context);
     }
-    if (question.suggestedOptions && question.suggestedOptions.length > 0) {
-      console.log(chalk.dim('Suggested options:'), question.suggestedOptions.join(', '));
+    if (question.suggestedOptions?.length) {
+      console.log(chalk.dim('Suggested:'), question.suggestedOptions.join(', '));
     }
     console.log();
 
@@ -737,6 +1103,8 @@ async function approvePlan(context: MenuContext): Promise<void> {
   const controller = new PlanController(sessionManager);
   controller.approvePlan(context.activePlan.id);
 
+  sessionManager.close();
+
   console.log(chalk.green('✓ Plan approved!'));
 
   const executeNow = await confirm({
@@ -744,37 +1112,58 @@ async function approvePlan(context: MenuContext): Promise<void> {
     default: true,
   });
 
-  sessionManager.close();
-
   if (executeNow) {
-    const background = await confirm({
-      message: 'Run in background?',
-      default: true,
-    });
-
-    await planCommand(undefined, {
-      path: context.projectPath,
-      resume: true,
-      dashboard: !background,
-      concurrency: '3',
-      background,
-    });
+    await executePlan(context);
   }
 }
 
 async function executePlan(context: MenuContext): Promise<void> {
-  const background = await confirm({
-    message: 'Run in background?',
-    default: true,
+  const runMode = await select({
+    message: 'How would you like to run?',
+    choices: [
+      { name: 'Foreground (watch progress)', value: 'foreground' },
+      { name: 'Background (daemon)', value: 'background' },
+    ],
   });
 
-  await planCommand(undefined, {
-    path: context.projectPath,
-    resume: true,
-    dashboard: !background,
-    concurrency: '3',
-    background,
+  const concurrency = await select({
+    message: 'Concurrency level:',
+    choices: [
+      { name: '1 (sequential)', value: '1' },
+      { name: '3 (default)', value: '3' },
+      { name: '5 (parallel)', value: '5' },
+    ],
   });
+
+  console.log();
+
+  if (runMode === 'background') {
+    const result = spawnDaemon(context.projectPath, 'plan', [
+      '--resume',
+      '-p', context.projectPath,
+      '--concurrency', concurrency,
+    ]);
+
+    if (result.success) {
+      console.log(chalk.green(`✓ Started in background (PID ${result.pid})`));
+      console.log(chalk.dim('\nYou can safely close this terminal.'));
+      console.log(chalk.dim('Use "Daemon controls" from main menu to view logs or stop.\n'));
+      context.hasDaemon = true;
+      context.daemonPid = result.pid;
+    } else {
+      console.log(chalk.red(`✗ Failed to start: ${result.error}`));
+    }
+    await input({ message: chalk.dim('Press Enter to continue...') });
+  } else {
+    console.log(chalk.cyan('Executing plan...\n'));
+    await planCommand(undefined, {
+      path: context.projectPath,
+      resume: true,
+      dashboard: true,
+      concurrency,
+    });
+    await input({ message: chalk.dim('Press Enter to continue...') });
+  }
 }
 
 async function rejectPlan(context: MenuContext): Promise<void> {
@@ -799,6 +1188,39 @@ async function rejectPlan(context: MenuContext): Promise<void> {
   console.log(chalk.yellow('Plan rejected'));
 }
 
+// ============================================================================
+// Init Flow (stay in menu after)
+// ============================================================================
+
+async function runInitFlow(context: MenuContext): Promise<void> {
+  await initCommand({
+    path: context.projectPath,
+    interactive: true,
+    claudeMd: true,
+    cloud: true,
+  });
+
+  // Refresh context after init
+  await refreshContext(context);
+
+  if (context.hasProject) {
+    console.log(chalk.green('\n✓ Project initialized successfully!\n'));
+
+    const startBuilding = await confirm({
+      message: 'Would you like to start planning a project?',
+      default: true,
+    });
+
+    if (startBuilding) {
+      await showPlanMenu(context);
+    }
+  }
+}
+
+// ============================================================================
+// Main Menu
+// ============================================================================
+
 export async function mainMenuCommand(options: { path: string }): Promise<void> {
   const projectPath = path.resolve(options.path);
 
@@ -808,6 +1230,9 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
   printContextInfo(context);
 
   while (true) {
+    // Refresh context each loop iteration
+    await refreshContext(context);
+
     const choices = buildMainMenuChoices(context);
 
     const action = await select({
@@ -822,63 +1247,30 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
 
     switch (action) {
       case 'init':
-        await initCommand({
-          path: projectPath,
-          interactive: true,
-          claudeMd: true,
-          cloud: true,
-        });
-        return;
-
-      case 'plan': {
-        const result = await showPlanMenu(context);
-        if (result === 'exit') return;
+        await runInitFlow(context);
         break;
-      }
 
-      case 'run': {
-        const background = await confirm({
-          message: 'Run in background?',
-          default: false,
-        });
+      case 'plan':
+        await showPlanMenu(context);
+        break;
 
-        await runCommand(undefined, {
-          path: projectPath,
-          sequential: false,
-          concurrency: '3',
-          dashboard: !background,
-          background,
-        });
-        return;
-      }
+      case 'run':
+        await showRunMenu(context);
+        break;
 
       case 'status':
-        await statusCommand({
-          path: projectPath,
-          json: false,
-        });
+        await statusCommand({ path: projectPath, json: false });
         console.log();
+        await input({ message: chalk.dim('Press Enter to continue...') });
         break;
 
       case 'requirements':
         await showRequirementsMenu(context);
         break;
 
-      case 'logs':
-        await tailLogs(projectPath, { lines: 50, follow: true });
-        return;
-
-      case 'stop': {
-        const result = stopDaemon(projectPath);
-        if (result.success) {
-          console.log(chalk.green('Daemon stopped'));
-          context.hasDaemon = false;
-        } else {
-          console.log(chalk.yellow(result.error ?? 'Failed to stop daemon'));
-        }
-        console.log();
+      case 'daemon':
+        await showDaemonMenu(context);
         break;
-      }
 
       case 'config':
         await showConfigMenu(context);
@@ -892,16 +1284,15 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
           console.log(chalk.dim(`  Current: ${info.current}`));
           console.log(chalk.dim(`  Latest:  ${info.latest}\n`));
 
-          const doUpdate = await confirm({
-            message: 'Update now?',
-            default: true,
-          });
+          const doUpdate = await confirm({ message: 'Update now?', default: true });
 
           if (doUpdate) {
             await updateToLatest();
+            console.log(chalk.dim('\nRestart orchestrate to use the new version.\n'));
+            return;
           }
         } else {
-          console.log(chalk.green('Already up to date!'));
+          console.log(chalk.green('✓ Already up to date!'));
           console.log(chalk.dim(`  Version: ${info.current}\n`));
         }
         break;
