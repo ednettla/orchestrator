@@ -121,11 +121,29 @@ export async function startBot(): Promise<void> {
   }
 
   await bot.start({
-    onStart: (botInfo) => {
+    onStart: async (botInfo) => {
       console.log(`Bot started: @${botInfo.username}`);
       if (webappConfig.enabled && webappServer) {
         const baseUrl = webappConfig.baseUrl ?? `http://localhost:${webappConfig.port}`;
         console.log(`WebApp available at: ${baseUrl}`);
+
+        // Set menu button to open WebApp (requires HTTPS URL)
+        if (baseUrl.startsWith('https://')) {
+          try {
+            await bot!.api.setChatMenuButton({
+              menu_button: {
+                type: 'web_app',
+                text: 'Open App',
+                web_app: { url: baseUrl },
+              },
+            });
+            console.log('Menu button configured for WebApp');
+          } catch (error) {
+            console.error('Failed to set menu button:', error);
+          }
+        } else {
+          console.log('Menu button requires HTTPS. Set webapp_base_url to enable.');
+        }
       }
     },
   });
