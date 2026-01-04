@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type { Session, TechStack, PipelinePhase, SessionStatus } from './types.js';
+import type { Session, TechStack, PipelinePhase, SessionStatus, DesignSystemInfo } from './types.js';
 import { DEFAULT_TECH_STACK } from './types.js';
 import { SQLiteStore, type StateStore } from '../state/store.js';
 
@@ -121,6 +121,29 @@ export class SessionManager {
     const session = await this.updateStatus('failed');
     await this.updatePhase('failed');
     return session;
+  }
+
+  /**
+   * Update the design system information for the current session
+   */
+  updateDesignSystem(designSystem: DesignSystemInfo): Session {
+    if (!this.currentSession) {
+      throw new Error('No active session');
+    }
+
+    const store = this.getStore();
+    this.currentSession = store.updateSession(this.currentSession.id, { designSystem });
+    return this.currentSession;
+  }
+
+  /**
+   * Get the design system information for the current session
+   */
+  getDesignSystem(): DesignSystemInfo | undefined {
+    if (!this.currentSession) {
+      return undefined;
+    }
+    return this.currentSession.designSystem;
   }
 
   listSessions(): Session[] {

@@ -104,6 +104,7 @@ program
   .option('-p, --path <path>', 'Project path', process.cwd())
   .option('--sequential', 'Run one at a time instead of concurrent')
   .option('--concurrency <n>', 'Max concurrent jobs', '3')
+  .option('--dashboard', 'Show interactive dashboard with real-time status')
   .action(runCommand);
 
 program
@@ -140,9 +141,11 @@ program
 program
   .command('plan')
   .description('Create and execute an autonomous project plan from a high-level goal')
-  .argument('<goal>', 'High-level project goal (e.g., "Build a Sales CRM")')
+  .argument('[goal]', 'High-level project goal (e.g., "Build a Sales CRM")')
   .option('-p, --path <path>', 'Project path', process.cwd())
   .option('--resume', 'Resume an existing plan instead of creating a new one')
+  .option('--dashboard', 'Show interactive dashboard during execution')
+  .option('--concurrency <n>', 'Max concurrent jobs', '3')
   .action(planCommand);
 
 // ============================================================================

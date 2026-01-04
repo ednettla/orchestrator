@@ -1,10 +1,20 @@
-import { spawn } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import type { SessionManager } from '../core/session-manager.js';
 import type { Task, AgentType, TechStack } from '../core/types.js';
 import { AGENT_CONFIGS } from '../core/types.js';
 import { buildPrompt } from './prompt-builder.js';
 import { mcpConfigManager } from '../core/mcp-config-manager.js';
 import { credentialManager } from '../core/credential-manager.js';
+
+// ============================================================================
+// Process Management Types
+// ============================================================================
+
+export interface ActiveProcess {
+  process: ChildProcess;
+  jobId: string;
+  startedAt: Date;
+}
 
 // ============================================================================
 // Types
@@ -24,6 +34,39 @@ export interface AgentMessage {
 }
 
 // ============================================================================
+// Streaming Types
+// ============================================================================
+
+export interface StreamingOptions {
+  /** Enable streaming display */
+  stream?: boolean;
+  /** Custom display handler */
+  onMessage?: (message: ClaudeStreamMessage) => void;
+}
+
+export interface ClaudeStreamMessage {
+  type: 'user' | 'assistant' | 'system' | 'result';
+  subtype?: 'init' | 'success' | 'error';
+  message?: {
+    content: StreamMessageContent[] | string;
+  };
+  session_id?: string;
+  result?: string;
+  total_cost_usd?: number;
+  error?: string;
+}
+
+export interface StreamMessageContent {
+  type: 'thinking' | 'text' | 'tool_use' | 'tool_result';
+  thinking?: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+  content?: unknown;
+}
+
+// ============================================================================
 // Agent Invoker
 // ============================================================================
 
@@ -38,6 +81,7 @@ export class AgentInvoker {
   private sessionManager: SessionManager;
   private workingPath: string;
   private options: InvokerOptions;
+  private activeProcesses: Map<string, ActiveProcess> = new Map();
 
   constructor(sessionManager: SessionManager, workingPath?: string, options?: InvokerOptions) {
     this.sessionManager = sessionManager;
@@ -46,11 +90,81 @@ export class AgentInvoker {
     this.options = options ?? { useMcp: true };
   }
 
-  async invoke(task: Task): Promise<AgentResult> {
+  /**
+   * Kill a running process by job ID
+   * Sends SIGTERM first, then SIGKILL after timeout
+   */
+  async kill(jobId: string, timeoutMs: number = 5000): Promise<boolean> {
+    const active = this.activeProcesses.get(jobId);
+    if (!active) {
+      return false;
+    }
+
+    const proc = active.process;
+
+    return new Promise<boolean>((resolve) => {
+      // Check if already dead
+      if (proc.killed || proc.exitCode !== null) {
+        this.activeProcesses.delete(jobId);
+        resolve(true);
+        return;
+      }
+
+      // Set up force kill timeout
+      const forceKillTimer = setTimeout(() => {
+        if (!proc.killed && proc.exitCode === null) {
+          proc.kill('SIGKILL');
+        }
+      }, timeoutMs);
+
+      // Clean up when process exits
+      proc.once('exit', () => {
+        clearTimeout(forceKillTimer);
+        this.activeProcesses.delete(jobId);
+        resolve(true);
+      });
+
+      // Send graceful termination signal
+      proc.kill('SIGTERM');
+    });
+  }
+
+  /**
+   * Kill all active processes
+   */
+  async killAll(timeoutMs: number = 5000): Promise<void> {
+    const killPromises = Array.from(this.activeProcesses.keys()).map(
+      (jobId) => this.kill(jobId, timeoutMs)
+    );
+    await Promise.all(killPromises);
+  }
+
+  /**
+   * Check if a job is currently running
+   */
+  isRunning(jobId: string): boolean {
+    const active = this.activeProcesses.get(jobId);
+    if (!active) return false;
+    return !active.process.killed && active.process.exitCode === null;
+  }
+
+  /**
+   * Get all active job IDs
+   */
+  getActiveJobs(): string[] {
+    return Array.from(this.activeProcesses.keys()).filter(
+      (jobId) => this.isRunning(jobId)
+    );
+  }
+
+  async invoke(task: Task, streamingOptions?: StreamingOptions, jobId?: string): Promise<AgentResult> {
     const session = this.sessionManager.getCurrentSession();
     if (!session) {
       throw new Error('No active session');
     }
+
+    // Generate a job ID if not provided
+    const activeJobId = jobId ?? `job-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
     const config = AGENT_CONFIGS[task.agentType];
     const systemPrompt = this.getSystemPrompt(task.agentType, session.techStack);
@@ -77,18 +191,30 @@ export class AgentInvoker {
         prompt: string;
         model: 'opus' | 'sonnet' | 'haiku';
         tools: string[];
+        jobId: string;
         mcpConfigPath?: string;
         useChrome?: boolean;
+        stream?: boolean;
+        onMessage?: (message: ClaudeStreamMessage) => void;
       } = {
         cwd: this.workingPath,
         prompt: fullPrompt,
         model: config.model,
         tools: config.tools,
+        jobId: activeJobId,
         useChrome,
       };
 
       if (mcpConfigPath) {
         runOptions.mcpConfigPath = mcpConfigPath;
+      }
+
+      if (streamingOptions?.stream) {
+        runOptions.stream = streamingOptions.stream;
+      }
+
+      if (streamingOptions?.onMessage) {
+        runOptions.onMessage = streamingOptions.onMessage;
       }
 
       const result = await this.runClaudeCode(runOptions);
@@ -128,15 +254,25 @@ export class AgentInvoker {
     prompt: string;
     model: 'opus' | 'sonnet' | 'haiku';
     tools: string[];
+    jobId: string;
     mcpConfigPath?: string;
     useChrome?: boolean;
+    stream?: boolean;
+    onMessage?: (message: ClaudeStreamMessage) => void;
   }): Promise<{ exitCode: number; output: string }> {
     return new Promise((resolve, reject) => {
       const args = [
         '--print',  // Non-interactive mode, print result
         '--dangerously-skip-permissions',  // Skip permission prompts for automation
-        '--output-format', 'text',  // Plain text output
       ];
+
+      // Use stream-json format when streaming is enabled
+      if (options.stream) {
+        args.push('--output-format', 'stream-json');
+        args.push('--verbose');  // Required for stream-json with --print
+      } else {
+        args.push('--output-format', 'text');
+      }
 
       // Add model flag
       if (options.model === 'opus') {
@@ -161,9 +297,7 @@ export class AgentInvoker {
         args.push('--allowed-tools', options.tools.join(','));
       }
 
-      // Add prompt as final argument
-      args.push(options.prompt);
-
+      // Use spawn with stdin pipe to pass the prompt (handles long prompts)
       const proc = spawn('claude', args, {
         cwd: options.cwd,
         env: {
@@ -173,11 +307,49 @@ export class AgentInvoker {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      let stdout = '';
+      // Track this process for potential kill
+      this.activeProcesses.set(options.jobId, {
+        process: proc,
+        jobId: options.jobId,
+        startedAt: new Date(),
+      });
+
+      // Write prompt to stdin and close it
+      proc.stdin.write(options.prompt);
+      proc.stdin.end();
+
+      let fullOutput = '';
       let stderr = '';
+      let lineBuffer = '';
 
       proc.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+
+        if (options.stream && options.onMessage) {
+          // Parse streaming JSON messages line by line
+          lineBuffer += chunk;
+          const lines = lineBuffer.split('\n');
+          lineBuffer = lines.pop() ?? '';  // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const message = JSON.parse(line) as ClaudeStreamMessage;
+                options.onMessage(message);
+
+                // Collect final result for return value
+                if (message.type === 'result' && message.result) {
+                  fullOutput = message.result;
+                }
+              } catch {
+                // Non-JSON line, append to output
+                fullOutput += line + '\n';
+              }
+            }
+          }
+        } else {
+          fullOutput += chunk;
+        }
       });
 
       proc.stderr.on('data', (data: Buffer) => {
@@ -185,16 +357,34 @@ export class AgentInvoker {
       });
 
       proc.on('error', (error) => {
+        // Clean up tracking
+        this.activeProcesses.delete(options.jobId);
         reject(new Error(`Failed to spawn claude: ${error.message}`));
       });
 
       proc.on('close', (code) => {
+        // Clean up tracking
+        this.activeProcesses.delete(options.jobId);
+
+        // Process any remaining data in buffer
+        if (options.stream && options.onMessage && lineBuffer.trim()) {
+          try {
+            const message = JSON.parse(lineBuffer) as ClaudeStreamMessage;
+            options.onMessage(message);
+            if (message.type === 'result' && message.result) {
+              fullOutput = message.result;
+            }
+          } catch {
+            fullOutput += lineBuffer;
+          }
+        }
+
         if (code !== 0 && stderr) {
           console.error('Claude stderr:', stderr);
         }
         resolve({
           exitCode: code ?? 1,
-          output: stdout || stderr,
+          output: fullOutput || stderr,
         });
       });
     });

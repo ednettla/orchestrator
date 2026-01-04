@@ -144,7 +144,22 @@ chmod +x dist/cli/index.js
 
 echo ""
 echo -e "${YELLOW}Linking globally...${NC}"
-npm link
+
+# Check if we need sudo for npm link
+NPM_PREFIX=$(npm prefix -g)
+if [ -w "$NPM_PREFIX/lib/node_modules" ] 2>/dev/null || [ -w "$NPM_PREFIX" ] 2>/dev/null; then
+    npm link
+elif command -v sudo &> /dev/null; then
+    echo -e "${YELLOW}Elevated permissions required for global install...${NC}"
+    sudo npm link
+else
+    echo -e "${YELLOW}Cannot write to npm global directory. Creating local symlink...${NC}"
+    # Fallback: add to user's local bin
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$INSTALL_DIR/dist/cli/index.js" "$HOME/.local/bin/orchestrate"
+    echo -e "${YELLOW}Added orchestrate to ~/.local/bin${NC}"
+    echo "Make sure ~/.local/bin is in your PATH"
+fi
 
 # Verify installation
 if command -v orchestrate &> /dev/null; then
@@ -153,6 +168,7 @@ else
     echo -e "${YELLOW}Note: You may need to add npm global bin to your PATH${NC}"
     echo "  Add this to your ~/.bashrc or ~/.zshrc:"
     echo "  export PATH=\"\$(npm prefix -g)/bin:\$PATH\""
+    echo "  OR: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
 # -----------------------------------------------------------------------------

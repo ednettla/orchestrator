@@ -58,6 +58,42 @@ export type PipelinePhase =
   | 'completed'
   | 'failed';
 
+export interface DesignSystemInfo {
+  /** Path to design tokens (e.g., "src/styles/tokens.css") */
+  tokensPath: string;
+  /** Path to UI components directory (e.g., "src/components/ui") */
+  componentsPath: string;
+  /** Path to theme configuration (e.g., "src/theme/index.ts") */
+  themePath?: string;
+  /** List of available component names */
+  availableComponents: string[];
+  /** Color palette for the design system */
+  colors: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    background: string;
+    foreground: string;
+    muted: string;
+    border: string;
+    error: string;
+    success: string;
+    warning: string;
+  };
+  /** Spacing scale */
+  spacing: {
+    xs: string;
+    sm: string;
+    md: string;
+    lg: string;
+    xl: string;
+  };
+  /** Whether the design system has been generated */
+  generated: boolean;
+  /** When the design system was generated */
+  generatedAt?: Date;
+}
+
 export interface Session {
   id: string;
   projectPath: string;
@@ -65,6 +101,8 @@ export interface Session {
   techStack: TechStack;
   currentPhase: PipelinePhase;
   status: SessionStatus;
+  /** Design system information for the project */
+  designSystem?: DesignSystemInfo;
   createdAt: Date;
   updatedAt: Date;
 }

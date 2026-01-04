@@ -10,7 +10,9 @@ import type {
   StructuredSpec,
 } from '../core/types.js';
 import { LOOP_LIMITS, RETRY_CONFIG } from '../core/types.js';
-import { AgentInvoker, type AgentResult } from '../agents/invoker.js';
+import { AgentInvoker, type AgentResult, type StreamingOptions } from '../agents/invoker.js';
+import { RetryableInvoker, type RetryResult } from '../agents/retry-wrapper.js';
+import { AgentMonitor } from '../agents/monitor.js';
 import type { StateStore } from '../state/store.js';
 
 // ============================================================================
@@ -21,19 +23,29 @@ interface PipelineControllerOptions {
   workingPath?: string;
   // Skip global phase updates - use when running multiple pipelines concurrently
   skipPhaseUpdates?: boolean;
+  // Agent monitor for reporting activity
+  monitor?: AgentMonitor;
+  // Streaming options for agent output
+  streamingOptions?: StreamingOptions;
 }
 
 export class PipelineController {
   private sessionManager: SessionManager;
   private store: StateStore;
   private agentInvoker: AgentInvoker;
+  private retryableInvoker: RetryableInvoker;
   private workingPath: string;
   private skipPhaseUpdates: boolean;
+  private monitor?: AgentMonitor;
+  private streamingOptions?: StreamingOptions;
 
   // Loop counters for revision limits
   private reviewLoopCount = 0;
   private testLoopCount = 0;
   private totalAgentCalls = 0;
+
+  // Current requirement for job ID generation
+  private currentRequirementId: string | null = null;
 
   constructor(sessionManager: SessionManager, options?: PipelineControllerOptions | string) {
     this.sessionManager = sessionManager;
@@ -46,9 +58,35 @@ export class PipelineController {
     } else {
       this.workingPath = options?.workingPath ?? sessionManager.getCurrentSession()?.projectPath ?? process.cwd();
       this.skipPhaseUpdates = options?.skipPhaseUpdates ?? false;
+      if (options?.monitor) {
+        this.monitor = options.monitor;
+      }
+      if (options?.streamingOptions) {
+        this.streamingOptions = options.streamingOptions;
+      }
     }
 
     this.agentInvoker = new AgentInvoker(sessionManager, this.workingPath);
+
+    const retryOptions: { monitor?: AgentMonitor } = {};
+    if (this.monitor) {
+      retryOptions.monitor = this.monitor;
+    }
+    this.retryableInvoker = new RetryableInvoker(this.agentInvoker, retryOptions);
+  }
+
+  /**
+   * Get the agent monitor (if set)
+   */
+  getMonitor(): AgentMonitor | undefined {
+    return this.monitor;
+  }
+
+  /**
+   * Kill any running agent processes
+   */
+  async killAll(): Promise<void> {
+    await this.retryableInvoker.killAll();
   }
 
   private async updatePhase(phase: PipelinePhase): Promise<void> {
@@ -68,6 +106,9 @@ export class PipelineController {
     if (!session) {
       throw new Error('No active session');
     }
+
+    // Track current requirement for job ID generation
+    this.currentRequirementId = requirementId;
 
     // Reset loop counters
     this.reviewLoopCount = 0;
@@ -95,6 +136,8 @@ export class PipelineController {
       this.store.updateRequirement(requirementId, { status: 'failed' });
       await this.updatePhase('failed');
       throw error;
+    } finally {
+      this.currentRequirementId = null;
     }
   }
 
@@ -145,15 +188,21 @@ export class PipelineController {
     // Reload requirement to get structured spec
     const updatedReq = this.store.getRequirement(requirement.id)!;
 
+    // Build input with optional design system
+    const input: Record<string, unknown> = {
+      structuredSpec: updatedReq.structuredSpec,
+      techStack: session.techStack,
+      projectPath: this.workingPath,
+    };
+    if (session.designSystem) {
+      input.designSystem = session.designSystem;
+    }
+
     const task = this.store.createTask({
       sessionId: session.id,
       requirementId: requirement.id,
       agentType: 'architect',
-      input: {
-        structuredSpec: updatedReq.structuredSpec,
-        techStack: session.techStack,
-        projectPath: this.workingPath,
-      },
+      input,
     });
 
     await this.runAgent(task);
@@ -174,15 +223,21 @@ export class PipelineController {
 
     const updatedReq = this.store.getRequirement(requirement.id)!;
 
+    // Build input with optional design system
+    const input: Record<string, unknown> = {
+      structuredSpec: updatedReq.structuredSpec,
+      techStack: session.techStack,
+      projectPath: this.workingPath,
+    };
+    if (session.designSystem) {
+      input.designSystem = session.designSystem;
+    }
+
     const task = this.store.createTask({
       sessionId: session.id,
       requirementId: requirement.id,
       agentType: 'coder',
-      input: {
-        structuredSpec: updatedReq.structuredSpec,
-        techStack: session.techStack,
-        projectPath: this.workingPath,
-      },
+      input,
     });
 
     await this.runAgent(task);
@@ -316,48 +371,93 @@ export class PipelineController {
       throw new Error(`Total agent call limit reached (${LOOP_LIMITS.totalAgentCallsPerRequirement}). Manual intervention required.`);
     }
 
+    // Generate job ID for monitoring
+    const jobId = `${this.currentRequirementId ?? 'unknown'}-${task.agentType}-${Date.now()}`;
+
+    // Get requirement info for monitor
+    const requirement = this.currentRequirementId
+      ? this.store.getRequirement(this.currentRequirementId)
+      : null;
+
+    // Report to monitor if available
+    if (this.monitor && requirement) {
+      const phase = this.getCurrentPhase(task.agentType);
+      this.monitor.startJob(
+        jobId,
+        requirement.id,
+        requirement.rawInput.substring(0, 50),
+        phase,
+        task.agentType
+      );
+    }
+
     // Update task status
     this.store.updateTask(task.id, {
       status: 'running',
       startedAt: new Date(),
     });
 
-    let lastError: Error | null = null;
+    try {
+      // Use retryable invoker with streaming options
+      const result = await this.retryableInvoker.invoke(
+        task,
+        jobId,
+        this.streamingOptions
+      );
 
-    for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
-      try {
-        const result = await this.agentInvoker.invoke(task);
+      // Update task with result
+      this.store.updateTask(task.id, {
+        status: 'completed',
+        output: result.output,
+        completedAt: new Date(),
+        retryCount: result.retryCount,
+      });
 
-        // Update task with result
-        this.store.updateTask(task.id, {
-          status: 'completed',
-          output: result.output,
-          completedAt: new Date(),
-        });
-
-        return result;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-
-        if (attempt < RETRY_CONFIG.maxRetries) {
-          const delay = Math.min(
-            RETRY_CONFIG.initialDelayMs * Math.pow(RETRY_CONFIG.backoffMultiplier, attempt - 1),
-            RETRY_CONFIG.maxDelayMs
-          );
-          this.log(chalk.yellow(`⚠ Attempt ${attempt} failed, retrying in ${delay}ms...`));
-          await this.sleep(delay);
-        }
+      // Report completion to monitor
+      if (this.monitor) {
+        this.monitor.completeJob(jobId, result.success);
       }
+
+      return result;
+    } catch (error) {
+      const lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Update task as failed
+      this.store.updateTask(task.id, {
+        status: 'failed',
+        errorMessage: lastError.message,
+        retryCount: RETRY_CONFIG.maxRetries,
+      });
+
+      // Report failure to monitor
+      if (this.monitor) {
+        this.monitor.completeJob(jobId, false);
+      }
+
+      throw lastError;
     }
+  }
 
-    // All retries failed
-    this.store.updateTask(task.id, {
-      status: 'failed',
-      errorMessage: lastError?.message ?? 'Unknown error',
-      retryCount: RETRY_CONFIG.maxRetries,
-    });
-
-    throw lastError;
+  /**
+   * Map agent type to pipeline phase for monitor reporting
+   */
+  private getCurrentPhase(agentType: AgentType): PipelinePhase {
+    switch (agentType) {
+      case 'planner':
+      case 'decomposer':
+        return 'planning';
+      case 'architect':
+        return 'architecting';
+      case 'designer':
+      case 'coder':
+        return 'coding';
+      case 'reviewer':
+        return 'reviewing';
+      case 'tester':
+        return 'testing';
+      default:
+        return 'planning';
+    }
   }
 
   // --------------------------------------------------------------------------

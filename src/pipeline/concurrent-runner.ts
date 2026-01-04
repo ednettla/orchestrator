@@ -1,19 +1,28 @@
 import chalk from 'chalk';
+import { createInterface } from 'node:readline';
+import { execFileSync } from 'node:child_process';
 import type { SessionManager } from '../core/session-manager.js';
 import type { Job } from '../core/types.js';
+import type { StreamingOptions } from '../agents/invoker.js';
 import { createWorktreeManager, WorktreeManager } from '../core/worktree-manager.js';
 import { PipelineController } from './controller.js';
+import { AgentMonitor } from '../agents/monitor.js';
 
 interface RunningJob {
   job: Job;
   requirementId: string;
   worktreePath: string;
   promise: Promise<void>;
+  controller: PipelineController;
 }
 
 interface ConcurrentRunnerOptions {
   maxConcurrency?: number;
   useWorktrees?: boolean;
+  /** Shared agent monitor for real-time activity tracking */
+  monitor?: AgentMonitor;
+  /** Streaming options for agent output */
+  streamingOptions?: StreamingOptions;
 }
 
 interface RequirementWithDeps {
@@ -27,6 +36,8 @@ export class ConcurrentRunner {
   private runningJobs: Map<string, RunningJob> = new Map();
   private worktreeManager: WorktreeManager | null = null;
   private useWorktrees: boolean = true;
+  private monitor: AgentMonitor;
+  private streamingOptions?: StreamingOptions;
 
   constructor(sessionManager: SessionManager, options: ConcurrentRunnerOptions | number = 3) {
     this.sessionManager = sessionManager;
@@ -34,10 +45,22 @@ export class ConcurrentRunner {
     if (typeof options === 'number') {
       // Backwards compatibility
       this.maxConcurrency = options;
+      this.monitor = new AgentMonitor();
     } else {
       this.maxConcurrency = options.maxConcurrency ?? 3;
       this.useWorktrees = options.useWorktrees ?? true;
+      this.monitor = options.monitor ?? new AgentMonitor();
+      if (options.streamingOptions) {
+        this.streamingOptions = options.streamingOptions;
+      }
     }
+  }
+
+  /**
+   * Get the agent monitor for dashboard integration
+   */
+  getMonitor(): AgentMonitor {
+    return this.monitor;
   }
 
   async runAll(requirementIds: string[]): Promise<void> {
@@ -53,10 +76,14 @@ export class ConcurrentRunner {
     try {
       const isGitRepo = await this.worktreeManager.isGitRepo();
       this.useWorktrees = isGitRepo;
-      if (!isGitRepo) {
-        console.log(chalk.yellow('Not a git repository - running sequentially without worktrees'));
-        console.log(chalk.dim('Initialize git for parallel execution: git init'));
-        this.maxConcurrency = 1;
+      if (!isGitRepo && this.maxConcurrency > 1) {
+        const initialized = await this.promptInitGit(session.projectPath);
+        if (initialized) {
+          this.useWorktrees = true;
+        } else {
+          console.log(chalk.yellow('Running sequentially without git worktrees'));
+          this.maxConcurrency = 1;
+        }
       }
     } catch {
       this.useWorktrees = false;
@@ -67,6 +94,9 @@ export class ConcurrentRunner {
     const queue = [...requirementIds];
     const completedJobs: string[] = [];
     const failedJobs: Map<string, string> = new Map();
+
+    // Set total jobs for progress tracking
+    this.monitor.setTotalJobs(requirementIds.length);
 
     console.log(chalk.cyan(`Starting ${queue.length} job(s) with max concurrency: ${this.maxConcurrency}`));
     console.log();
@@ -123,11 +153,15 @@ export class ConcurrentRunner {
     this.worktreeManager = createWorktreeManager(session.projectPath, store);
     try {
       const isGitRepo = await this.worktreeManager.isGitRepo();
-      if (!isGitRepo && this.useWorktrees) {
-        console.log(chalk.yellow('Not a git repository - running sequentially without worktrees'));
-        console.log(chalk.dim('Initialize git for parallel execution: git init'));
-        this.maxConcurrency = 1;
-        this.useWorktrees = false;
+      if (!isGitRepo && this.useWorktrees && this.maxConcurrency > 1) {
+        const initialized = await this.promptInitGit(session.projectPath);
+        if (initialized) {
+          this.useWorktrees = true;
+        } else {
+          console.log(chalk.yellow('Running sequentially without git worktrees'));
+          this.maxConcurrency = 1;
+          this.useWorktrees = false;
+        }
       }
     } catch {
       this.useWorktrees = false;
@@ -140,6 +174,9 @@ export class ConcurrentRunner {
     const pending = new Map<string, RequirementWithDeps>(
       requirements.map(r => [r.id, r])
     );
+
+    // Set total jobs for progress tracking
+    this.monitor.setTotalJobs(requirements.length);
 
     console.log(chalk.cyan(`Starting ${requirements.length} job(s) with dependency-aware scheduling`));
     console.log(chalk.dim(`Max concurrency: ${this.maxConcurrency}`));
@@ -255,10 +292,20 @@ export class ConcurrentRunner {
 
     // Run pipeline asynchronously
     // Skip global phase updates to avoid race conditions with concurrent jobs
-    const controller = new PipelineController(this.sessionManager, {
+    const controllerOptions: {
+      workingPath: string;
+      skipPhaseUpdates: boolean;
+      monitor: AgentMonitor;
+      streamingOptions?: StreamingOptions;
+    } = {
       workingPath: worktreePath,
       skipPhaseUpdates: this.maxConcurrency > 1,
-    });
+      monitor: this.monitor,
+    };
+    if (this.streamingOptions) {
+      controllerOptions.streamingOptions = this.streamingOptions;
+    }
+    const controller = new PipelineController(this.sessionManager, controllerOptions);
     const promise = controller.run(requirementId)
       .then(() => {
         store.updateJob(job.id, {
@@ -282,6 +329,7 @@ export class ConcurrentRunner {
       requirementId,
       worktreePath,
       promise,
+      controller,
     };
 
     this.runningJobs.set(requirementId, runningJob);
@@ -318,7 +366,10 @@ export class ConcurrentRunner {
   async cancelAll(): Promise<void> {
     const store = this.sessionManager.getStore();
 
+    // Kill all running agent processes
+    const killPromises: Promise<void>[] = [];
     for (const [requirementId, runningJob] of this.runningJobs) {
+      killPromises.push(runningJob.controller.killAll());
       store.updateJob(runningJob.job.id, {
         status: 'cancelled',
         completedAt: new Date(),
@@ -326,6 +377,58 @@ export class ConcurrentRunner {
       store.updateRequirement(requirementId, { status: 'failed' });
     }
 
+    await Promise.all(killPromises);
     this.runningJobs.clear();
+
+    // Reset monitor
+    this.monitor.reset();
+  }
+
+  /**
+   * Prompt the user to initialize a git repository for parallel execution.
+   * Returns true if git was successfully initialized.
+   */
+  private async promptInitGit(projectPath: string): Promise<boolean> {
+    console.log(chalk.yellow('\n⚠ Not a git repository'));
+    console.log(chalk.dim('Parallel execution requires git worktrees.\n'));
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(
+        chalk.bold('Initialize git repository? ') + chalk.dim('(Y/n) '),
+        (response) => {
+          resolve(response.trim().toLowerCase());
+        }
+      );
+    });
+
+    rl.close();
+
+    if (answer === '' || answer === 'y' || answer === 'yes') {
+      try {
+        console.log(chalk.dim('\nInitializing git repository...'));
+        execFileSync('git', ['init'], { cwd: projectPath, stdio: 'pipe' });
+
+        console.log(chalk.dim('Staging files...'));
+        execFileSync('git', ['add', '-A'], { cwd: projectPath, stdio: 'pipe' });
+
+        console.log(chalk.dim('Creating initial commit...'));
+        execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: projectPath, stdio: 'pipe' });
+
+        console.log(chalk.green('✓ Git repository initialized\n'));
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.log(chalk.red(`\n✗ Failed to initialize git: ${message}\n`));
+        return false;
+      }
+    }
+
+    console.log();
+    return false;
   }
 }

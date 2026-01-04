@@ -10,13 +10,20 @@ import {
   presentApprovalPrompt,
 } from '../../planning/plan-presenter.js';
 import { ConcurrentRunner } from '../../pipeline/concurrent-runner.js';
+import { StreamingDisplay } from '../streaming-display.js';
+import { AgentMonitor } from '../../agents/monitor.js';
+import { renderDashboard } from '../../ui/dashboard.js';
+import { createDesignController } from '../../design/design-controller.js';
+import type { StreamingOptions } from '../../agents/invoker.js';
 
 interface PlanOptions {
   path: string;
   resume?: boolean;
+  dashboard?: boolean;
+  concurrency?: string;
 }
 
-export async function planCommand(goal: string, options: PlanOptions): Promise<void> {
+export async function planCommand(goal: string | undefined, options: PlanOptions): Promise<void> {
   const projectPath = path.resolve(options.path);
 
   console.log(chalk.bold('\n🎯 Project Planning\n'));
@@ -40,6 +47,12 @@ export async function planCommand(goal: string, options: PlanOptions): Promise<v
       console.log('Use --resume to continue with this plan, or complete/reject it first.');
       sessionManager.close();
       return;
+    } else if (!goal) {
+      // No plan and no goal provided
+      console.log(chalk.red('No active plan found. Please provide a goal.'));
+      console.log(chalk.dim('Usage: orchestrate plan "Your project goal"'));
+      sessionManager.close();
+      return;
     } else {
       // Create new plan
       console.log(chalk.dim('Creating plan for:'), goal);
@@ -51,22 +64,22 @@ export async function planCommand(goal: string, options: PlanOptions): Promise<v
     switch (plan.status) {
       case 'drafting':
         // Generate questions
-        await runQuestionPhase(controller, plan.id);
+        await runQuestionPhase(controller, plan.id, options);
         break;
 
       case 'questioning':
         // Continue Q&A
-        await runQuestionPhase(controller, plan.id);
+        await runQuestionPhase(controller, plan.id, options);
         break;
 
       case 'pending_approval':
         // Show plan and get approval
-        await runApprovalPhase(controller, plan.id);
+        await runApprovalPhase(controller, plan.id, options);
         break;
 
       case 'approved':
         // Execute the plan
-        await executePlan(controller, plan.id);
+        await executePlan(controller, plan.id, options);
         break;
 
       case 'executing':
@@ -93,25 +106,23 @@ export async function planCommand(goal: string, options: PlanOptions): Promise<v
   }
 }
 
-async function runQuestionPhase(controller: PlanController, planId: string): Promise<void> {
+async function runQuestionPhase(controller: PlanController, planId: string, options: PlanOptions): Promise<void> {
   let plan = controller.getPlan(planId);
   if (!plan) throw new Error('Plan not found');
 
   // Generate questions if needed
   if (plan.questions.length === 0) {
-    console.log(chalk.cyan('Generating clarifying questions...'));
-    console.log();
+    console.log(chalk.cyan('Generating clarifying questions...\n'));
 
-    const spinner = startSpinner();
-    try {
-      const questions = await controller.generateQuestions(planId);
-      stopSpinner(spinner);
-      console.log(chalk.green(`Generated ${questions.length} questions\n`));
-      plan = controller.getPlan(planId)!;
-    } catch (error) {
-      stopSpinner(spinner);
-      throw error;
-    }
+    // Use streaming display instead of spinner
+    const display = new StreamingDisplay();
+    const questions = await controller.generateQuestions(planId, {
+      stream: true,
+      onMessage: (msg) => display.display(msg),
+    });
+
+    console.log(chalk.green(`\nGenerated ${questions.length} questions\n`));
+    plan = controller.getPlan(planId)!;
   }
 
   // Display questions
@@ -128,7 +139,7 @@ async function runQuestionPhase(controller: PlanController, planId: string): Pro
   if (unansweredQuestions.length === 0) {
     console.log(chalk.green('All questions answered!\n'));
     rl.close();
-    await generateAndReviewPlan(controller, planId);
+    await generateAndReviewPlan(controller, planId, options);
     return;
   }
 
@@ -143,27 +154,25 @@ async function runQuestionPhase(controller: PlanController, planId: string): Pro
   rl.close();
 
   // Generate the plan
-  await generateAndReviewPlan(controller, planId);
+  await generateAndReviewPlan(controller, planId, options);
 }
 
-async function generateAndReviewPlan(controller: PlanController, planId: string): Promise<void> {
-  console.log(chalk.cyan('\nGenerating implementation plan...'));
-  console.log();
+async function generateAndReviewPlan(controller: PlanController, planId: string, options: PlanOptions): Promise<void> {
+  console.log(chalk.cyan('\nGenerating implementation plan...\n'));
 
-  const spinner = startSpinner();
-  try {
-    await controller.generatePlan(planId);
-    stopSpinner(spinner);
-    console.log(chalk.green('Plan generated!\n'));
-  } catch (error) {
-    stopSpinner(spinner);
-    throw error;
-  }
+  // Use streaming display instead of spinner
+  const display = new StreamingDisplay();
+  await controller.generatePlan(planId, {
+    stream: true,
+    onMessage: (msg) => display.display(msg),
+  });
 
-  await runApprovalPhase(controller, planId);
+  console.log(chalk.green('\nPlan generated!\n'));
+
+  await runApprovalPhase(controller, planId, options);
 }
 
-async function runApprovalPhase(controller: PlanController, planId: string): Promise<void> {
+async function runApprovalPhase(controller: PlanController, planId: string, options: PlanOptions): Promise<void> {
   const plan = controller.getPlan(planId);
   if (!plan) throw new Error('Plan not found');
 
@@ -189,7 +198,7 @@ async function runApprovalPhase(controller: PlanController, planId: string): Pro
     case 'approve':
       console.log(chalk.green('\n✅ Plan approved!\n'));
       controller.approvePlan(planId);
-      await executePlan(controller, planId);
+      await executePlan(controller, planId, options);
       break;
 
     case 'e':
@@ -215,9 +224,48 @@ async function runApprovalPhase(controller: PlanController, planId: string): Pro
   }
 }
 
-async function executePlan(controller: PlanController, planId: string): Promise<void> {
+async function executePlan(controller: PlanController, planId: string, options: PlanOptions): Promise<void> {
   const plan = controller.getPlan(planId);
   if (!plan) throw new Error('Plan not found');
+
+  const useDashboard = options.dashboard ?? false;
+  const maxConcurrency = parseInt(options.concurrency ?? '3', 10);
+
+  const session = sessionManager.getCurrentSession();
+  if (!session) throw new Error('No active session');
+
+  // Generate design system if needed (before any requirements execute)
+  const designController = createDesignController(sessionManager);
+  if (designController.hasFrontend(session.techStack)) {
+    const hasDesignSystem = await designController.hasDesignSystem(session.projectPath);
+
+    if (!hasDesignSystem) {
+      console.log(chalk.cyan('🎨 Generating design system...\n'));
+
+      const result = await designController.generateDesignSystem(session.projectPath, session.techStack);
+
+      if (result.success) {
+        console.log(chalk.green('✓ Design system created'));
+        console.log(chalk.dim(`  Components: ${result.components.join(', ')}`));
+        console.log(chalk.dim(`  Files: ${result.filesCreated.length} created\n`));
+
+        // Store design system info in session
+        const designSystemInfo = designController.createDefaultDesignSystemInfo(session.techStack);
+        designSystemInfo.availableComponents = result.components;
+        sessionManager.updateDesignSystem(designSystemInfo);
+      } else {
+        console.log(chalk.yellow('⚠ Design system generation failed, continuing without...'));
+        console.log(chalk.dim(`  Error: ${result.error}\n`));
+      }
+    } else {
+      // Get existing design system info
+      const existingInfo = await designController.getDesignSystemInfo(session.projectPath, session.techStack);
+      if (existingInfo) {
+        console.log(chalk.dim(`Using existing design system (${existingInfo.availableComponents.length} components)\n`));
+        sessionManager.updateDesignSystem(existingInfo);
+      }
+    }
+  }
 
   console.log(chalk.cyan('Converting plan to requirements...\n'));
 
@@ -235,7 +283,7 @@ async function executePlan(controller: PlanController, planId: string): Promise<
   }
 
   console.log();
-  console.log(chalk.bold('Starting concurrent execution...\n'));
+  console.log(chalk.bold(`Starting concurrent execution (max ${maxConcurrency} jobs)...\n`));
 
   // Get requirements with their dependencies for dependency-aware execution
   const requirementsWithDeps = plan.requirements.map(pr => ({
@@ -259,10 +307,31 @@ async function executePlan(controller: PlanController, planId: string): Promise<
     dependencies: r.dependencies.map(d => plannedToActual.get(d) || '').filter(Boolean),
   }));
 
+  // Create monitor and streaming display
+  const monitor = new AgentMonitor();
+  const streamingDisplay = new StreamingDisplay();
+
+  // Set up streaming options
+  const streamingOptions: StreamingOptions = {
+    stream: true,
+    onMessage: (msg) => {
+      if (!useDashboard) {
+        streamingDisplay.display(msg);
+      }
+    },
+  };
+
+  // Show dashboard if requested
+  if (useDashboard) {
+    renderDashboard(store, session, monitor);
+  }
+
   // Create concurrent runner and execute
   const runner = new ConcurrentRunner(sessionManager, {
-    maxConcurrency: 3,
+    maxConcurrency,
     useWorktrees: true,
+    monitor,
+    streamingOptions,
   });
 
   try {
@@ -271,7 +340,9 @@ async function executePlan(controller: PlanController, planId: string): Promise<
     // Update plan status
     store.updatePlan(planId, { status: 'completed' });
 
-    console.log(chalk.green('\n✅ Plan execution completed!\n'));
+    if (!useDashboard) {
+      console.log(chalk.green('\n✅ Plan execution completed!\n'));
+    }
   } catch (error) {
     console.error(chalk.red('\n❌ Plan execution failed:'), error instanceof Error ? error.message : error);
     throw error;
@@ -296,27 +367,3 @@ function askQuestion(rl: ReturnType<typeof createInterface>, question: string, o
   });
 }
 
-let spinnerInterval: ReturnType<typeof setInterval> | null = null;
-
-function startSpinner(): void {
-  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let i = 0;
-
-  process.stdout.write('  ' + frames[0]);
-
-  spinnerInterval = setInterval(() => {
-    i = (i + 1) % frames.length;
-    process.stdout.clearLine(0);
-    process.stdout.cursorTo(0);
-    process.stdout.write('  ' + frames[i]);
-  }, 80);
-}
-
-function stopSpinner(interval: void): void {
-  if (spinnerInterval) {
-    clearInterval(spinnerInterval);
-    spinnerInterval = null;
-    process.stdout.clearLine(0);
-    process.stdout.cursorTo(0);
-  }
-}

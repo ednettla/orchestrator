@@ -5,6 +5,7 @@ import type {
   SessionStatus,
   PipelinePhase,
   TechStack,
+  DesignSystemInfo,
   Requirement,
   RequirementStatus,
   StructuredSpec,
@@ -111,6 +112,7 @@ interface CreateSessionParams {
 interface UpdateSessionParams {
   currentPhase: PipelinePhase;
   status: SessionStatus;
+  designSystem: DesignSystemInfo;
 }
 
 interface CreateRequirementParams {
@@ -247,6 +249,7 @@ export class SQLiteStore implements StateStore {
         tech_stack TEXT NOT NULL,
         current_phase TEXT NOT NULL DEFAULT 'init',
         status TEXT NOT NULL DEFAULT 'active',
+        design_system TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -377,6 +380,17 @@ export class SQLiteStore implements StateStore {
       CREATE INDEX IF NOT EXISTS idx_cloud_links_session ON cloud_service_links(session_id);
       CREATE INDEX IF NOT EXISTS idx_cloud_links_service ON cloud_service_links(service);
     `);
+
+    // Migration: Add design_system column to existing sessions tables
+    this.migrateAddDesignSystem();
+  }
+
+  private migrateAddDesignSystem(): void {
+    const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    const hasDesignSystem = sessionColumns.some(col => col.name === 'design_system');
+    if (!hasDesignSystem) {
+      this.db.prepare('ALTER TABLE sessions ADD COLUMN design_system TEXT').run();
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -419,6 +433,10 @@ export class SQLiteStore implements StateStore {
     if (updates.status !== undefined) {
       sets.push('status = ?');
       values.push(updates.status);
+    }
+    if (updates.designSystem !== undefined) {
+      sets.push('design_system = ?');
+      values.push(JSON.stringify(updates.designSystem));
     }
 
     values.push(id);
@@ -946,7 +964,7 @@ export class SQLiteStore implements StateStore {
   // --------------------------------------------------------------------------
 
   private mapSession(row: SessionRow): Session {
-    return {
+    const session: Session = {
       id: row.id,
       projectPath: row.project_path,
       projectName: row.project_name,
@@ -956,6 +974,12 @@ export class SQLiteStore implements StateStore {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     };
+
+    if (row.design_system) {
+      session.designSystem = JSON.parse(row.design_system) as DesignSystemInfo;
+    }
+
+    return session;
   }
 
   private mapRequirement(row: RequirementRow): Requirement {
@@ -1091,6 +1115,7 @@ interface SessionRow {
   tech_stack: string;
   current_phase: string;
   status: string;
+  design_system: string | null;
   created_at: string;
   updated_at: string;
 }

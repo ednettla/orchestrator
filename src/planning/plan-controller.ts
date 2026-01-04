@@ -8,7 +8,7 @@ import type {
   Risk,
   QuestionCategory,
 } from '../core/types.js';
-import { AgentInvoker } from '../agents/invoker.js';
+import { AgentInvoker, type StreamingOptions } from '../agents/invoker.js';
 
 // ============================================================================
 // Plan Controller
@@ -44,7 +44,7 @@ export class PlanController {
   /**
    * Generate clarifying questions for a plan
    */
-  async generateQuestions(planId: string): Promise<ClarifyingQuestion[]> {
+  async generateQuestions(planId: string, streamingOptions?: StreamingOptions): Promise<ClarifyingQuestion[]> {
     const session = this.sessionManager.getCurrentSession();
     if (!session) {
       throw new Error('No active session');
@@ -73,7 +73,7 @@ export class PlanController {
     });
 
     // Invoke the decomposer agent
-    const result = await this.invoker.invoke(task);
+    const result = await this.invoker.invoke(task, streamingOptions);
 
     if (!result.success) {
       store.updateTask(task.id, {
@@ -134,7 +134,7 @@ export class PlanController {
   /**
    * Generate the full plan based on answered questions
    */
-  async generatePlan(planId: string): Promise<Plan> {
+  async generatePlan(planId: string, streamingOptions?: StreamingOptions): Promise<Plan> {
     const session = this.sessionManager.getCurrentSession();
     if (!session) {
       throw new Error('No active session');
@@ -164,7 +164,7 @@ export class PlanController {
     });
 
     // Invoke the decomposer agent
-    const result = await this.invoker.invoke(task);
+    const result = await this.invoker.invoke(task, streamingOptions);
 
     if (!result.success) {
       store.updateTask(task.id, {

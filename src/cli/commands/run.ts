@@ -4,12 +4,17 @@ import ora from 'ora';
 import { sessionManager } from '../../core/session-manager.js';
 import { PipelineController } from '../../pipeline/controller.js';
 import { ConcurrentRunner } from '../../pipeline/concurrent-runner.js';
+import { AgentMonitor } from '../../agents/monitor.js';
+import { StreamingDisplay } from '../streaming-display.js';
+import { renderDashboard } from '../../ui/dashboard.js';
 import type { Requirement } from '../../core/types.js';
+import type { StreamingOptions } from '../../agents/invoker.js';
 
 interface RunOptions {
   path: string;
   sequential?: boolean;
   concurrency?: string;
+  dashboard?: boolean;
 }
 
 export async function runCommand(
@@ -19,6 +24,7 @@ export async function runCommand(
   const projectPath = path.resolve(options.path);
   const maxConcurrency = parseInt(options.concurrency ?? '3', 10);
   const sequential = options.sequential ?? false;
+  const useDashboard = options.dashboard ?? false;
 
   console.log(chalk.bold('\n🚀 Orchestrator - Running Pipeline\n'));
 
@@ -80,27 +86,64 @@ export async function runCommand(
     }
     console.log();
 
+    // Create shared monitor and streaming display
+    const monitor = new AgentMonitor();
+    const streamingDisplay = new StreamingDisplay();
+
+    // Set up streaming options for activity display
+    const streamingOptions: StreamingOptions = {
+      stream: true,
+      onMessage: (msg) => {
+        if (!useDashboard) {
+          streamingDisplay.display(msg);
+        }
+      },
+    };
+
+    if (useDashboard) {
+      // Show interactive dashboard
+      renderDashboard(store, session, monitor);
+    }
+
     if (sequential || requirementsToRun.length === 1) {
       // Sequential execution - run one at a time
-      console.log(chalk.dim('Mode:'), 'Sequential');
-      console.log();
+      if (!useDashboard) {
+        console.log(chalk.dim('Mode:'), 'Sequential');
+        console.log();
+      }
 
       for (const req of requirementsToRun) {
-        console.log(chalk.cyan(`\n▶ Running: ${req.rawInput.substring(0, 50)}...`));
-        const controller = new PipelineController(sessionManager);
+        if (!useDashboard) {
+          console.log(chalk.cyan(`\n▶ Running: ${req.rawInput.substring(0, 50)}...`));
+        }
+        const controller = new PipelineController(sessionManager, {
+          monitor,
+          streamingOptions,
+        });
         await controller.run(req.id);
-        console.log(chalk.green(`✅ Completed: ${req.id.substring(0, 8)}`));
+        if (!useDashboard) {
+          console.log(chalk.green(`✅ Completed: ${req.id.substring(0, 8)}`));
+        }
       }
     } else {
       // Concurrent execution with git worktrees
-      console.log(chalk.dim('Mode:'), `Concurrent (max ${maxConcurrency} jobs)`);
-      console.log();
+      if (!useDashboard) {
+        console.log(chalk.dim('Mode:'), `Concurrent (max ${maxConcurrency} jobs)`);
+        console.log();
+      }
 
-      const runner = new ConcurrentRunner(sessionManager, maxConcurrency);
+      const runner = new ConcurrentRunner(sessionManager, {
+        maxConcurrency,
+        useWorktrees: true,
+        monitor,
+        streamingOptions,
+      });
       await runner.runAll(requirementsToRun.map((r) => r.id));
     }
 
-    console.log(chalk.green('\n✅ All requirements completed!\n'));
+    if (!useDashboard) {
+      console.log(chalk.green('\n✅ All requirements completed!\n'));
+    }
 
     sessionManager.close();
   } catch (error) {
