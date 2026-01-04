@@ -244,7 +244,7 @@ async function importCommand(
 /**
  * Interactive secrets management
  */
-async function interactiveCommand(options: { path?: string }): Promise<void> {
+export async function interactiveCommand(options: { path?: string }): Promise<void> {
   const projectPath = options.path ?? process.cwd();
   const manager = createSecretsManager(projectPath);
 

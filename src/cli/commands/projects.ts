@@ -340,7 +340,7 @@ async function cleanupCommand(options: { dryRun?: boolean }): Promise<void> {
 /**
  * Interactive project management
  */
-async function interactiveCommand(): Promise<void> {
+export async function interactiveCommand(): Promise<void> {
   const registry = getProjectRegistry();
 
   while (true) {

@@ -19,6 +19,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { input, select, confirm } from '@inquirer/prompts';
 import { getGlobalStore, type UserRole, type AuthorizedUser } from '../../core/global-store.js';
+import {
+  spawnTelegramDaemon,
+  getTelegramDaemonStatus,
+  stopTelegramDaemon,
+  tailTelegramLogs,
+  formatElapsed,
+} from '../telegram-daemon.js';
 
 const ROLES: UserRole[] = ['admin', 'operator', 'viewer'];
 
@@ -171,8 +178,15 @@ async function startCommand(options: { foreground?: boolean }): Promise<void> {
     }
   } else {
     // Daemon mode - spawn detached process
-    console.log(chalk.yellow('Daemon mode not yet implemented.'));
-    console.log(chalk.dim('Use --foreground to run in foreground mode.'));
+    const result = spawnTelegramDaemon();
+    if (result.success) {
+      console.log(chalk.green(`\n✓ Telegram bot started (PID ${result.pid})`));
+      console.log(chalk.dim('  View logs: orchestrate telegram logs'));
+      console.log(chalk.dim('  Stop bot:  orchestrate telegram stop'));
+    } else {
+      console.error(chalk.red(`\n✗ Failed to start: ${result.error}`));
+      process.exit(1);
+    }
   }
 }
 
@@ -180,8 +194,12 @@ async function startCommand(options: { foreground?: boolean }): Promise<void> {
  * Stop bot daemon
  */
 async function stopCommand(): Promise<void> {
-  console.log(chalk.yellow('Daemon mode not yet implemented.'));
-  console.log(chalk.dim('If running in foreground, use Ctrl+C to stop.'));
+  const result = stopTelegramDaemon();
+  if (result.success) {
+    console.log(chalk.green('✓ Telegram bot stopped'));
+  } else {
+    console.log(chalk.yellow(result.error ?? 'Bot is not running'));
+  }
 }
 
 /**
@@ -221,8 +239,16 @@ async function statusCommand(): Promise<void> {
     console.log(`${chalk.cyan('Mode:')} polling`);
   }
 
-  // Bot running status (would check PID file in daemon mode)
-  console.log(`${chalk.cyan('Status:')} ${chalk.dim('unknown (daemon mode not implemented)')}`);
+  // Bot running status
+  const daemonStatus = getTelegramDaemonStatus();
+  if (daemonStatus.running && daemonStatus.info) {
+    const elapsed = formatElapsed(daemonStatus.info.startedAt);
+    console.log(`${chalk.cyan('Status:')} ${chalk.green('Running')}`);
+    console.log(chalk.dim(`  PID: ${daemonStatus.info.pid}`));
+    console.log(chalk.dim(`  Uptime: ${elapsed}`));
+  } else {
+    console.log(`${chalk.cyan('Status:')} ${chalk.dim('Stopped')}`);
+  }
 
   console.log();
 }
@@ -398,7 +424,7 @@ async function listUsersCommand(): Promise<void> {
 /**
  * Interactive telegram management
  */
-async function interactiveCommand(): Promise<void> {
+export async function interactiveCommand(): Promise<void> {
   const store = getGlobalStore();
 
   while (true) {
@@ -409,13 +435,18 @@ async function interactiveCommand(): Promise<void> {
       chalk.dim(`\nBot: ${config.botToken ? 'configured' : 'not configured'} | Users: ${users.length}`)
     );
 
+    const daemonStatus = getTelegramDaemonStatus();
     const action = await select({
       message: 'What would you like to do?',
       choices: [
         { value: 'status', name: 'Show status' },
         { value: 'setup', name: 'Setup bot token' },
-        { value: 'start', name: 'Start bot' },
+        {
+          value: 'start',
+          name: daemonStatus.running ? 'Start bot (already running)' : 'Start bot',
+        },
         { value: 'stop', name: 'Stop bot' },
+        { value: 'logs', name: 'View logs' },
         { value: 'add-user', name: 'Add user' },
         { value: 'remove-user', name: 'Remove user' },
         { value: 'list-users', name: 'List users' },
@@ -434,10 +465,13 @@ async function interactiveCommand(): Promise<void> {
           await setupCommand();
           break;
         case 'start':
-          await startCommand({ foreground: true });
+          await startCommand({}); // Use daemon mode by default
           break;
         case 'stop':
           await stopCommand();
+          break;
+        case 'logs':
+          await tailTelegramLogs({ lines: 50, follow: false });
           break;
         case 'add-user':
           await addUserCommand(undefined, {});
@@ -506,6 +540,18 @@ export function registerTelegramCommand(program: Command): void {
     .command('list-users')
     .description('List all authorized users')
     .action(listUsersCommand);
+
+  telegram
+    .command('logs')
+    .description('View Telegram bot logs')
+    .option('-n, --lines <n>', 'Number of lines to show', '50')
+    .option('-f, --follow', 'Follow log output (like tail -f)')
+    .action(async (opts) => {
+      await tailTelegramLogs({
+        lines: parseInt(opts.lines, 10),
+        follow: opts.follow,
+      });
+    });
 
   telegram
     .command('interactive')

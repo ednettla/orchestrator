@@ -25,6 +25,9 @@ import { authFlowManager } from '../../core/auth-flow-manager.js';
 import { createWorktreeHealthChecker, type WorktreeIssue } from '../../core/worktree-health.js';
 import type { Plan, PlannedRequirement } from '../../core/types.js';
 import type { MCPServerConfig, MCPTransportType, MCPAuthType } from '../../core/mcp-types.js';
+import { interactiveCommand as secretsInteractive } from './secrets.js';
+import { interactiveCommand as projectsInteractive } from './projects.js';
+import { interactiveCommand as telegramInteractive } from './telegram.js';
 
 interface MenuContext {
   hasProject: boolean;
@@ -234,6 +237,25 @@ function buildMainMenuChoices(context: MenuContext): MenuChoice[] {
     name: 'Configuration',
     value: 'config',
     description: 'Project and MCP settings',
+  });
+
+  // Global settings menus
+  choices.push({
+    name: 'Secrets management',
+    value: 'secrets',
+    description: 'Manage environment secrets (dev/staging/prod)',
+  });
+
+  choices.push({
+    name: 'Project registry',
+    value: 'projects',
+    description: 'Manage global project registry',
+  });
+
+  choices.push({
+    name: 'Telegram bot',
+    value: 'telegram',
+    description: 'Bot control and user management',
   });
 
   choices.push({
@@ -1525,6 +1547,18 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
 
       case 'config':
         await showConfigMenu(context);
+        break;
+
+      case 'secrets':
+        await secretsInteractive({ path: context.projectPath });
+        break;
+
+      case 'projects':
+        await projectsInteractive();
+        break;
+
+      case 'telegram':
+        await telegramInteractive();
         break;
 
       case 'update': {
