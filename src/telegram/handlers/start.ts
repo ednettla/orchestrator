@@ -19,25 +19,34 @@ export async function startHandler(ctx: CommandContext): Promise<CommandResult> 
   const { user } = ctx;
   const roleEmoji = getRoleEmoji(user.role);
 
+  const { InlineKeyboard } = await import('grammy');
+  const keyboard = new InlineKeyboard()
+    .text('Open Menu', 'menu:back')
+    .row()
+    .text('List Projects', 'switch_project');
+
   const response = [
-    `👋 Welcome, *${user.displayName}*!`,
+    `Welcome, *${user.displayName}*! ${roleEmoji}`,
     '',
-    `${roleEmoji} Role: ${user.role}`,
+    'I help you manage Orchestrator projects remotely.',
     '',
-    'I can help you manage your Orchestrator projects remotely.',
+    '*Get Started:*',
+    '`/menu` - Interactive menu with all options',
+    '`/projects` - List your projects',
     '',
-    '*Quick Start:*',
-    '• `/projects` - List your projects',
-    '• `/<project> status` - Check project status',
-    '• `/<project> plan "goal"` - Start planning',
+    '*Quick Commands:*',
+    '`/plan` - Create autonomous project plan',
+    '`/run` - Execute pending requirements',
+    '`/status` - Check project status',
     '',
-    'Use /help for all available commands.',
+    '_Tip: Use /menu for the best experience!_',
   ].join('\n');
 
   return {
     success: true,
     response,
     parseMode: 'Markdown',
+    keyboard,
   };
 }
 

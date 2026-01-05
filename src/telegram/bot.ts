@@ -132,20 +132,20 @@ export async function startBot(): Promise<void> {
       // Register commands with Telegram for autocomplete menu
       try {
         await bot!.api.setMyCommands([
+          // Primary commands - most used
+          { command: 'menu', description: 'Interactive menu (recommended)' },
           { command: 'start', description: 'Welcome and getting started' },
           { command: 'help', description: 'Show all available commands' },
-          { command: 'webapp', description: 'Open the Mini App' },
+          // Project management
           { command: 'projects', description: 'List all projects' },
           { command: 'switch', description: 'Set active project' },
-          { command: 'new', description: 'Create a new project' },
-          { command: 'init', description: 'Initialize an existing directory' },
-          { command: 'paths', description: 'Manage allowed project paths' },
           { command: 'status', description: 'Show project status' },
+          // Core workflows
           { command: 'plan', description: 'Create autonomous project plan' },
-          { command: 'design', description: 'Manage design system' },
           { command: 'run', description: 'Execute pending requirements' },
           { command: 'add', description: 'Add a new requirement' },
           { command: 'reqs', description: 'List all requirements' },
+          // Monitoring
           { command: 'logs', description: 'View recent logs' },
           { command: 'stop', description: 'Stop running daemon' },
         ]);

@@ -271,19 +271,36 @@ export function registerAllHandlers(): void {
  * Get command help text
  */
 export function getHelpText(): string {
-  const lines = ['📚 *Available Commands*\n'];
-
-  // Global commands
-  lines.push('*Global Commands*');
-  for (const cmd of commandDefinitions.filter((c) => !c.projectScoped)) {
-    lines.push(`\`${cmd.usage}\` - ${cmd.description}`);
-  }
-
-  lines.push('\n*Project Commands*');
-  lines.push('_Replace <project> with your project name or alias_\n');
-  for (const cmd of commandDefinitions.filter((c) => c.projectScoped)) {
-    lines.push(`\`${cmd.usage}\` - ${cmd.description}`);
-  }
+  const lines = [
+    '*Orchestrator Bot*',
+    '',
+    '*Recommended:* Use `/menu` for an interactive experience!',
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    '*Quick Commands*',
+    '`/menu` - Interactive menu (best experience)',
+    '`/projects` - List your projects',
+    '`/switch <name>` - Set active project',
+    '',
+    '*Planning & Execution*',
+    '`/plan` - Create autonomous project plan',
+    '`/run` - Execute pending requirements',
+    '`/status` - Check project status',
+    '',
+    '*Requirements*',
+    '`/add "text"` - Add a requirement',
+    '`/reqs` - List all requirements',
+    '',
+    '*Monitoring*',
+    '`/logs` - View recent logs',
+    '`/stop` - Stop running daemon',
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    '_These commands use your active project._',
+    '_Set one with /switch or /projects first._',
+  ];
 
   return lines.join('\n');
 }
