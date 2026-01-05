@@ -8,7 +8,7 @@
 
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
-import { requirementsListKeyboard } from '../keyboards.js';
+import { requirementsListKeyboard, requirementAddedKeyboard } from '../keyboards.js';
 import {
   addRequirement,
   getRequirements,
@@ -70,9 +70,9 @@ export async function addHandler(ctx: CommandContext): Promise<CommandResult> {
     success: true,
     response:
       `✅ *Requirement Added*\n\n` +
-      `_${requirement}_\n\n` +
-      `Use \`/${project.name} run\` to start execution.`,
+      `_${requirement}_`,
     parseMode: 'Markdown',
+    keyboard: requirementAddedKeyboard(project.name),
   };
 }
 

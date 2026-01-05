@@ -12,6 +12,7 @@ import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { initProjectFromApi } from '../project-bridge.js';
 import { safeEditMessage } from '../utils/safe-edit.js';
+import { projectInitializedKeyboard } from '../keyboards.js';
 
 // ============================================================================
 // Handler Registration
@@ -209,12 +210,11 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
       const projectName = pathInfo.path.split('/').pop() ?? 'project';
       await safeEditMessage(ctx,
         '✅ *Project Initialized!*\n\n' +
-          `Path: \`${pathInfo.path}\`\n\n` +
-          `You can now use \`/${projectName}\` commands:\n` +
-          `• \`/${projectName} status\` - View status\n` +
-          `• \`/${projectName} add "requirement"\` - Add requirement\n` +
-          `• \`/${projectName} plan\` - Generate plan`,
-        { parse_mode: 'Markdown' }
+          `Path: \`${pathInfo.path}\``,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: projectInitializedKeyboard(projectName),
+        }
       );
     } else {
       await safeEditMessage(ctx,

@@ -12,6 +12,8 @@ import { getProjectRegistry } from '../core/project-registry.js';
 import type { CommandContext, CommandDefinition, CommandResult } from './types.js';
 import type { AuthorizedUser } from '../core/global-store.js';
 import { hasRequiredRole } from './security.js';
+import { sendTyping } from './utils/typing.js';
+import { projectActionsKeyboard } from './keyboards.js';
 
 // ============================================================================
 // Command Registry
@@ -144,11 +146,13 @@ export async function routeCommand(
       const project = registry.getProject(parsed.command);
 
       if (project) {
-        // Show project status as default
+        // Show project status as default with action buttons
+        const card = formatProjectCard(project);
         return {
           success: true,
-          response: formatProjectCard(project),
+          response: card.text,
           parseMode: 'Markdown',
+          keyboard: card.keyboard,
         };
       }
     }
@@ -199,6 +203,9 @@ export async function routeCommand(
     user,
   };
 
+  // Show typing indicator while processing
+  await sendTyping(ctx);
+
   // Execute handler
   try {
     return await definition.handler(commandCtx);
@@ -223,24 +230,21 @@ function formatProjectCard(project: {
   path: string;
   alias?: string | null;
   status?: string;
-}): string {
+}): { text: string; keyboard: ReturnType<typeof projectActionsKeyboard> } {
   const lines = [
     `━━━ *${project.name}* ━━━`,
     '',
-    `📂 ${project.path}`,
+    `📂 \`${project.path}\``,
   ];
 
   if (project.alias) {
-    lines.push(`🏷 Alias: ${project.alias}`);
+    lines.push(`🏷 Alias: \`${project.alias}\``);
   }
 
-  lines.push('');
-  lines.push('Use buttons below or type commands:');
-  lines.push(`• /${project.name} status`);
-  lines.push(`• /${project.name} plan "goal"`);
-  lines.push(`• /${project.name} run`);
-
-  return lines.join('\n');
+  return {
+    text: lines.join('\n'),
+    keyboard: projectActionsKeyboard(project.name),
+  };
 }
 
 // ============================================================================

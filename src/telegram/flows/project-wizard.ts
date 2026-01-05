@@ -28,6 +28,7 @@ import {
   buildStepMessage,
   buildResumeKeyboard,
 } from './keyboards.js';
+import { projectCreatedKeyboard, configMenuKeyboard } from '../keyboards.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -519,16 +520,15 @@ async function createProjectFromWizard(
     // Clear wizard state
     clearWizardState(telegramId);
 
-    // Show success message
+    // Show success message with action buttons
     await ctx.editMessageText(
       `✅ *Project Created!*\n\n` +
       `📁 *${state.projectName}*\n` +
-      `📂 \`${projectPath}\`\n\n` +
-      `*Next steps:*\n` +
-      `• \`/${state.projectName} status\` - Check project status\n` +
-      `• \`/${state.projectName} add "requirement"\` - Add requirements\n` +
-      `• \`/${state.projectName} plan\` - Generate execution plan`,
-      { parse_mode: 'Markdown' }
+      `📂 \`${projectPath}\``,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: projectCreatedKeyboard(state.projectName),
+      }
     );
 
     // If cloud services were selected, trigger auth flows
@@ -541,8 +541,11 @@ async function createProjectFromWizard(
       await ctx.reply(
         `🔐 *Cloud Services*\n\n` +
         `You selected: ${services.join(', ')}\n\n` +
-        `Use \`/${state.projectName} config\` to set up authentication for these services.`,
-        { parse_mode: 'Markdown' }
+        `Configure authentication in the Config menu.`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: configMenuKeyboard(state.projectName),
+        }
       );
     }
   } catch (error) {

@@ -13,6 +13,7 @@ import { getGlobalStore } from '../../core/global-store.js';
 import { handleWizardCallback } from '../flows/project-wizard.js';
 import { handlePlanWizardCallback } from '../flows/plan-wizard.js';
 import { safeEditMessage } from '../utils/safe-edit.js';
+import { sendTyping } from '../utils/typing.js';
 import {
   getProjectStatus,
   getDaemonStatus,
@@ -72,6 +73,9 @@ async function handleCallback(ctx: Context): Promise<void> {
     await ctx.answerCallbackQuery({ text: 'Unauthorized' });
     return;
   }
+
+  // Show typing indicator while processing
+  await sendTyping(ctx);
 
   try {
     switch (data.action) {

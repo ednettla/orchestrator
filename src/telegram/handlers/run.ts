@@ -8,7 +8,13 @@
 
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
-import { stopConfirmKeyboard } from '../keyboards.js';
+import {
+  stopConfirmKeyboard,
+  daemonRunningKeyboard,
+  runStartedKeyboard,
+  requirementAddedKeyboard,
+  projectActionsKeyboard,
+} from '../keyboards.js';
 import { startRun, stopDaemon, getProjectStatus, getDaemonStatus, resumeSession, refreshClaudeMd } from '../project-bridge.js';
 
 /**
@@ -42,9 +48,9 @@ export async function runHandler(ctx: CommandContext): Promise<CommandResult> {
       success: false,
       response:
         `⚠️ Daemon is already running for ${project.name}\n\n` +
-        `PID: ${daemonStatus.pid}\n\n` +
-        `Use \`/${project.name} stop\` to stop it first.`,
+        `PID: ${daemonStatus.pid}`,
       parseMode: 'Markdown',
+      keyboard: daemonRunningKeyboard(project.name),
     };
   }
 
@@ -53,11 +59,9 @@ export async function runHandler(ctx: CommandContext): Promise<CommandResult> {
   if (status.requirements.pending === 0 && status.requirements.inProgress === 0) {
     return {
       success: false,
-      response:
-        `⚠️ No pending requirements to run\n\n` +
-        `Add requirements with:\n` +
-        `\`/${project.name} add "your requirement"\``,
+      response: `⚠️ No pending requirements to run`,
       parseMode: 'Markdown',
+      keyboard: requirementAddedKeyboard(project.name),
     };
   }
 
@@ -78,12 +82,9 @@ export async function runHandler(ctx: CommandContext): Promise<CommandResult> {
       `▶️ *Execution Started*\n\n` +
       `Project: ${project.name}\n` +
       `Pending: ${status.requirements.pending} requirements\n\n` +
-      `The daemon is now running in the background.\n\n` +
-      `Commands:\n` +
-      `• \`/${project.name} status\` - Check progress\n` +
-      `• \`/${project.name} logs\` - View logs\n` +
-      `• \`/${project.name} stop\` - Stop execution`,
+      `The daemon is now running in the background.`,
     parseMode: 'Markdown',
+    keyboard: runStartedKeyboard(project.name),
   };
 }
 
@@ -180,10 +181,9 @@ export async function resumeHandler(ctx: CommandContext): Promise<CommandResult>
   if (daemonStatus.running) {
     return {
       success: false,
-      response:
-        `⚠️ Daemon is already running for ${project.name}\n\n` +
-        `Use \`/${project.name} status\` to check progress.`,
+      response: `⚠️ Daemon is already running for ${project.name}`,
       parseMode: 'Markdown',
+      keyboard: daemonRunningKeyboard(project.name),
     };
   }
 
@@ -202,11 +202,9 @@ export async function resumeHandler(ctx: CommandContext): Promise<CommandResult>
     response:
       `🔄 *Session Resumed*\n\n` +
       `Project: ${project.name}\n\n` +
-      `The daemon is resuming interrupted work.\n\n` +
-      `Commands:\n` +
-      `• \`/${project.name} status\` - Check progress\n` +
-      `• \`/${project.name} logs\` - View logs`,
+      `The daemon is resuming interrupted work.`,
     parseMode: 'Markdown',
+    keyboard: runStartedKeyboard(project.name),
   };
 }
 
@@ -256,5 +254,6 @@ export async function refreshHandler(ctx: CommandContext): Promise<CommandResult
       (injectSecrets ? `Environment: ${env}\n` : '') +
       `\nThe project context has been updated.`,
     parseMode: 'Markdown',
+    keyboard: projectActionsKeyboard(project.name),
   };
 }

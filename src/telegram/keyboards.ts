@@ -242,6 +242,111 @@ export function destructiveConfirmKeyboard(
 }
 
 // ============================================================================
+// Next Steps Keyboards
+// ============================================================================
+
+/**
+ * After project creation - show status, plan, add buttons
+ */
+export function projectCreatedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📊 View Status', createCallbackData({ action: 'status', projectName }))
+    .text('📋 Create Plan', createCallbackData({ action: 'plan', projectName }))
+    .row()
+    .text('➕ Add Requirement', createCallbackData({ action: 'add_req', projectName }));
+}
+
+/**
+ * After project initialization - show status, plan, add buttons
+ */
+export function projectInitializedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }))
+    .text('📋 Plan', createCallbackData({ action: 'plan', projectName }))
+    .row()
+    .text('➕ Add Requirement', createCallbackData({ action: 'add_req', projectName }))
+    .text('⚙️ Config', createCallbackData({ action: 'config', projectName }));
+}
+
+/**
+ * After plan approved - show run and status buttons
+ */
+export function planApprovedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('▶️ Start Execution', createCallbackData({ action: 'run', projectName }))
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }));
+}
+
+/**
+ * After plan rejected - show new plan button
+ */
+export function planRejectedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📋 Create New Plan', createCallbackData({ action: 'plan', projectName }))
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }));
+}
+
+/**
+ * After requirement added - show run, add more, list buttons
+ */
+export function requirementAddedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('▶️ Run', createCallbackData({ action: 'run', projectName }))
+    .text('➕ Add Another', createCallbackData({ action: 'add_req', projectName }))
+    .row()
+    .text('📋 List All', createCallbackData({ action: 'reqs', projectName }));
+}
+
+/**
+ * After run started - show status, logs, stop buttons
+ */
+export function runStartedKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }))
+    .text('📝 Logs', createCallbackData({ action: 'logs', projectName }))
+    .row()
+    .text('⏹ Stop', createCallbackData({ action: 'stop', projectName }));
+}
+
+/**
+ * After questions answered - show approve button
+ */
+export function allQuestionsAnsweredKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Approve Plan', createCallbackData({ action: 'approve', projectName }))
+    .text('📋 View Questions', createCallbackData({ action: 'questions', projectName }));
+}
+
+/**
+ * Questions pending - show view questions button
+ */
+export function questionsPendingKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('❓ View Questions', createCallbackData({ action: 'questions', projectName }))
+    .text('❌ Cancel Plan', createCallbackData({ action: 'reject', projectName }));
+}
+
+/**
+ * No active plan - show create plan button
+ */
+export function noPlanKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📋 Create Plan', createCallbackData({ action: 'plan', projectName }))
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }));
+}
+
+/**
+ * After daemon already running - show stop and status buttons
+ */
+export function daemonRunningKeyboard(projectName: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📊 Status', createCallbackData({ action: 'status', projectName }))
+    .text('⏹ Stop', createCallbackData({ action: 'stop', projectName }))
+    .row()
+    .text('📝 Logs', createCallbackData({ action: 'logs', projectName }));
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 

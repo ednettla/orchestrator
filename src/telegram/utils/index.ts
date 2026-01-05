@@ -5,3 +5,4 @@
  */
 
 export * from './safe-edit.js';
+export * from './typing.js';

@@ -31,6 +31,7 @@ import {
   buildCancelledMessage,
   buildErrorMessage,
 } from './plan-keyboards.js';
+import { planApprovedKeyboard, planRejectedKeyboard } from '../keyboards.js';
 import {
   startPlanFromApi,
   answerPlanQuestionFromApi,
@@ -755,8 +756,11 @@ async function handleApprove(ctx: Context, state: PlanWizardState): Promise<void
       ctx,
       `✅ *Plan Approved!*\n\n` +
         `Project: ${state.projectName}\n\n` +
-        `Use \`/${state.projectName} run\` to start execution.`,
-      { parse_mode: 'Markdown' }
+        `Ready for execution.`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: planApprovedKeyboard(state.projectName),
+      }
     );
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -788,9 +792,11 @@ async function handleReject(ctx: Context, state: PlanWizardState): Promise<void>
     await safeEditMessage(
       ctx,
       `❌ *Plan Rejected*\n\n` +
-        `Project: ${state.projectName}\n\n` +
-        `Start a new plan with \`/${state.projectName} plan "new goal"\``,
-      { parse_mode: 'Markdown' }
+        `Project: ${state.projectName}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: planRejectedKeyboard(state.projectName),
+      }
     );
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';

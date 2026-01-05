@@ -16,6 +16,14 @@ import {
 import { startPlanWizard } from '../flows/plan-wizard.js';
 import { createStore } from '../../state/store.js';
 import type { ClarifyingQuestion } from '../../core/types.js';
+import {
+  noPlanKeyboard,
+  questionsPendingKeyboard,
+  allQuestionsAnsweredKeyboard,
+  planApprovedKeyboard,
+  planRejectedKeyboard,
+  planApprovalKeyboard,
+} from '../keyboards.js';
 
 /**
  * Handle plan command
@@ -100,11 +108,9 @@ export async function approveHandler(ctx: CommandContext): Promise<CommandResult
   if (!plan) {
     return {
       success: false,
-      response:
-        `No pending plan to approve.\n\n` +
-        `Start a new plan with:\n` +
-        `\`/${project.name} plan "your goal"\``,
+      response: `No pending plan to approve.`,
       parseMode: 'Markdown',
+      keyboard: noPlanKeyboard(project.name),
     };
   }
 
@@ -113,11 +119,9 @@ export async function approveHandler(ctx: CommandContext): Promise<CommandResult
   if (unanswered.length > 0) {
     return {
       success: false,
-      response:
-        `Cannot approve: ${unanswered.length} question(s) unanswered.\n\n` +
-        `Use \`/${project.name} questions\` to see pending questions.\n` +
-        `Use \`/${project.name} answer <id> "answer"\` to respond.`,
+      response: `Cannot approve: ${unanswered.length} question(s) unanswered.`,
       parseMode: 'Markdown',
+      keyboard: questionsPendingKeyboard(project.name),
     };
   }
 
@@ -136,9 +140,9 @@ export async function approveHandler(ctx: CommandContext): Promise<CommandResult
     response:
       `✅ *Plan Approved*\n\n` +
       `Project: ${project.name}\n\n` +
-      `Execution will begin shortly.\n` +
-      `Use \`/${project.name} run\` to start or \`/${project.name} status\` to monitor.`,
+      `Ready for execution.`,
     parseMode: 'Markdown',
+    keyboard: planApprovedKeyboard(project.name),
   };
 }
 
@@ -182,11 +186,10 @@ export async function rejectHandler(ctx: CommandContext): Promise<CommandResult>
     success: true,
     response:
       `❌ *Plan Rejected*\n\n` +
-      `Project: ${project.name}\n` +
-      (reason ? `Reason: _${reason}_\n\n` : '\n') +
-      `You can create a new plan with:\n` +
-      `\`/${project.name} plan "your goal"\``,
+      `Project: ${project.name}` +
+      (reason ? `\nReason: _${reason}_` : ''),
     parseMode: 'Markdown',
+    keyboard: planRejectedKeyboard(project.name),
   };
 }
 
@@ -245,9 +248,9 @@ export async function answerHandler(ctx: CommandContext): Promise<CommandResult>
       success: true,
       response:
         `✅ *Answer Submitted*\n\n` +
-        `${remaining} question(s) remaining.\n\n` +
-        `Use \`/${project.name} questions\` to see next question.`,
+        `${remaining} question(s) remaining.`,
       parseMode: 'Markdown',
+      keyboard: questionsPendingKeyboard(project.name),
     };
   }
 
@@ -255,9 +258,9 @@ export async function answerHandler(ctx: CommandContext): Promise<CommandResult>
     success: true,
     response:
       `✅ *Answer Submitted*\n\n` +
-      `All questions answered!\n\n` +
-      `Use \`/${project.name} approve\` to approve the plan.`,
+      `All questions answered!`,
     parseMode: 'Markdown',
+    keyboard: allQuestionsAnsweredKeyboard(project.name),
   };
 }
 
@@ -304,11 +307,9 @@ export async function questionsHandler(ctx: CommandContext): Promise<CommandResu
   if (!plan) {
     return {
       success: true,
-      response:
-        `No active plan.\n\n` +
-        `Start a new plan with:\n` +
-        `\`/${project.name} plan "your goal"\``,
+      response: `No active plan.`,
       parseMode: 'Markdown',
+      keyboard: noPlanKeyboard(project.name),
     };
   }
 
@@ -322,18 +323,17 @@ export async function questionsHandler(ctx: CommandContext): Promise<CommandResu
         success: true,
         response:
           `✅ *All Questions Answered*\n\n` +
-          `${answered.length} question(s) answered.\n\n` +
-          `Use \`/${project.name} approve\` to approve the plan.`,
+          `${answered.length} question(s) answered.`,
         parseMode: 'Markdown',
+        keyboard: allQuestionsAnsweredKeyboard(project.name),
       };
     }
 
     return {
       success: true,
-      response:
-        `No questions for this plan.\n\n` +
-        `Use \`/${project.name} approve\` to approve or \`/${project.name} reject\` to reject.`,
+      response: `No questions for this plan.`,
       parseMode: 'Markdown',
+      keyboard: planApprovalKeyboard(project.name, plan.id),
     };
   }
 
@@ -355,12 +355,13 @@ export async function questionsHandler(ctx: CommandContext): Promise<CommandResu
     lines.push(`_...and ${unanswered.length - 5} more_\n`);
   }
 
-  lines.push(`Answer with:\n\`/${project.name} answer <id> "your answer"\``);
+  lines.push(`_Reply: \`/${project.name} answer <id> "answer"\`_`);
 
   return {
     success: true,
     response: lines.join('\n'),
     parseMode: 'Markdown',
+    keyboard: questionsPendingKeyboard(project.name),
   };
 }
 
