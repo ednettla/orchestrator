@@ -23,6 +23,7 @@ import { designHandler } from './design.js';
 // Export callback-based handler registration functions
 export { registerInitHandlers } from './init.js';
 export { registerPathsHandlers } from './paths.js';
+export { registerCallbackHandlers } from './callbacks.js';
 
 // ============================================================================
 // Command Definitions

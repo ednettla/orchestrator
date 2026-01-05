@@ -10,7 +10,7 @@
 import { Bot } from 'grammy';
 import { getGlobalStore } from '../core/global-store.js';
 import { createWebAppServer, type WebAppServer } from './webapp/server.js';
-import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, getHelpText } from './handlers/index.js';
+import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers, getHelpText } from './handlers/index.js';
 import { routeCommand } from './router.js';
 
 let bot: Bot | null = null;
@@ -59,9 +59,10 @@ export async function startBot(): Promise<void> {
     await next();
   });
 
-  // Register callback-based handlers for init and paths (these use inline keyboards)
+  // Register callback-based handlers for inline keyboards
   registerInitHandlers(bot);
   registerPathsHandlers(bot);
+  registerCallbackHandlers(bot);
 
   // Route all text messages through the command router
   bot.on('message:text', async (ctx) => {

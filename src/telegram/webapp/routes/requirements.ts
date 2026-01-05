@@ -349,7 +349,7 @@ export function createRequirementsRouter(): Router {
   router.delete(
     '/:reqId',
     requireRole('admin'),
-    (req: AuthenticatedRequest, res: Response) => {
+    async (req: AuthenticatedRequest, res: Response) => {
       try {
         const projectId = req.params.projectId as string;
         const reqId = req.params.reqId as string;
@@ -385,16 +385,23 @@ export function createRequirementsRouter(): Router {
           return;
         }
 
-        // Delete requirement - cascades to tasks via foreign key
-        // Note: The store doesn't have a deleteRequirement method
-        // We would need to add it or use raw SQL
-        // For now, return a not implemented error
+        // Delete using project-bridge function
         store.close();
 
-        // TODO: Implement requirement deletion in store
-        res.status(501).json({
-          success: false,
-          error: { code: 'NOT_IMPLEMENTED', message: 'Requirement deletion not yet implemented' },
+        const { deleteRequirement } = await import('../../project-bridge.js');
+        const result = await deleteRequirement(context.project.path, reqId);
+
+        if (!result.success) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'DELETE_FAILED', message: result.error ?? 'Failed to delete requirement' },
+          });
+          return;
+        }
+
+        res.json({
+          success: true,
+          message: 'Requirement deleted',
         });
       } catch (error) {
         console.error('[API] Error deleting requirement:', error);
