@@ -20,6 +20,9 @@ import { logsHandler } from './logs.js';
 import { statusHandler } from './status.js';
 import { designHandler } from './design.js';
 
+// Unified flow menu handler
+import { menuHandler } from './menu.js';
+
 // Export callback-based handler registration functions
 export { registerInitHandlers } from './init.js';
 export { registerPathsHandlers } from './paths.js';
@@ -44,6 +47,14 @@ const commandDefinitions: CommandDefinition[] = [
     description: 'Show available commands',
     usage: '/help',
     handler: helpHandler,
+    requiredRole: 'viewer',
+    projectScoped: false,
+  },
+  {
+    name: 'menu',
+    description: 'Open interactive menu',
+    usage: '/menu',
+    handler: menuHandler,
     requiredRole: 'viewer',
     projectScoped: false,
   },

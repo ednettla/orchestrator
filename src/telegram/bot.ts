@@ -16,6 +16,12 @@ import { handleWizardTextInput } from './flows/project-wizard.js';
 import { handlePlanWizardTextInput } from './flows/plan-wizard.js';
 import { handleRequirementWizardTextInput } from './flows/requirement-wizard.js';
 
+// Unified Interactions System
+import {
+  handleFlowCallback,
+  handleFlowTextInput,
+} from '../interactions/index.js';
+
 let bot: Bot | null = null;
 let webappServer: WebAppServer | null = null;
 
@@ -62,6 +68,18 @@ export async function startBot(): Promise<void> {
     await next();
   });
 
+  // Handle unified flow callbacks first
+  bot.on('callback_query:data', async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+
+    // Try unified flow system first
+    const handled = await handleFlowCallback(ctx, data);
+    if (handled) return;
+
+    // Fall through to existing handlers
+    await next();
+  });
+
   // Register callback-based handlers for inline keyboards
   registerInitHandlers(bot);
   registerPathsHandlers(bot);
@@ -77,6 +95,10 @@ export async function startBot(): Promise<void> {
 
     // Check if wizard is waiting for text input
     if (!text.startsWith('/')) {
+      // Check unified flow system first
+      const handledByFlow = await handleFlowTextInput(ctx, text);
+      if (handledByFlow) return;
+
       // Check project wizard first
       const handledByProjectWizard = await handleWizardTextInput(ctx, text);
       if (handledByProjectWizard) return;
