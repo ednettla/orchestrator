@@ -1591,6 +1591,26 @@ async function runUnifiedSubFlow(
       continue;
     }
 
+    // Check for flow markers - sub-flow wants to navigate to another sub-flow
+    if (currentStepId.startsWith('flow:')) {
+      const nestedFlowId = getSubFlowId(currentStepId);
+      const ctx = subRunner.getContext();
+
+      // Handle nested sub-flow
+      switch (nestedFlowId) {
+        case 'run':
+          await runUnifiedSubFlow(runFlow, ctx as RunFlowContext, projectPath);
+          break;
+        // Add other flows as needed
+      }
+
+      // After nested flow, refresh and go back to this flow's menu
+      subRunner.navigateTo('menu');
+      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+      subRunner.updateContext({ ...refreshed, ...ctx });
+      continue;
+    }
+
     if (result.done) {
       break;
     }
