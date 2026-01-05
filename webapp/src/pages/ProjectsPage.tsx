@@ -88,82 +88,55 @@ export default function ProjectsPage() {
     );
   }
 
-  if (!data || data.length === 0) {
-    return (
-      <div className={styles.empty}>
-        <div className={styles.emptyIcon}>📁</div>
-        <h2>No Projects</h2>
-        <p>Create your first project to get started.</p>
-        <button className={styles.createButton} onClick={openCreateModal}>
-          Create Project
-        </button>
+  // Render content based on data state
+  const renderContent = () => {
+    if (!data || data.length === 0) {
+      return (
+        <div className={styles.empty}>
+          <div className={styles.emptyIcon}>📁</div>
+          <h2>No Projects</h2>
+          <p>Create your first project to get started.</p>
+          <button className={styles.createButton} onClick={openCreateModal}>
+            Create Project
+          </button>
+        </div>
+      );
+    }
 
-        {showCreateModal && (
-          <div className={styles.modalOverlay} onClick={() => setShowCreateModal(false)}>
-            <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <h3 className={styles.modalTitle}>Create Project</h3>
-              <p className={styles.modalDescription}>
-                Enter a name for your new project. It will be created in your projects directory.
-              </p>
-              <div className={styles.formGroup}>
-                <input
-                  type="text"
-                  className={styles.formInput}
-                  placeholder="my-project"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  autoFocus
-                />
+    return (
+      <div className={styles.container}>
+        <h2 className={styles.title}>Projects</h2>
+        <div className={styles.list}>
+          {data.map((project) => (
+            <button
+              key={project.id}
+              className={styles.projectCard}
+              onClick={() => navigate(`/project/${project.id}`)}
+            >
+              <div className={styles.projectInfo}>
+                <h3 className={styles.projectName}>{project.name}</h3>
+                <p className={styles.projectPath}>{project.path}</p>
               </div>
-              <div className={styles.modalActions}>
-                <button
-                  className={styles.modalCancel}
-                  onClick={() => setShowCreateModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className={styles.modalSubmit}
-                  onClick={handleCreate}
-                  disabled={!projectName.trim() || createMutation.isPending}
-                >
-                  {createMutation.isPending ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+              <span className={`${styles.status} ${styles[project.status] ?? ''}`}>
+                {project.status}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Floating Action Button */}
+        <button className={styles.fab} onClick={openCreateModal}>
+          +
+        </button>
       </div>
     );
-  }
+  };
 
   return (
-    <div className={styles.container}>
-      <h2 className={styles.title}>Projects</h2>
-      <div className={styles.list}>
-        {data.map((project) => (
-          <button
-            key={project.id}
-            className={styles.projectCard}
-            onClick={() => navigate(`/project/${project.id}`)}
-          >
-            <div className={styles.projectInfo}>
-              <h3 className={styles.projectName}>{project.name}</h3>
-              <p className={styles.projectPath}>{project.path}</p>
-            </div>
-            <span className={`${styles.status} ${styles[project.status] ?? ''}`}>
-              {project.status}
-            </span>
-          </button>
-        ))}
-      </div>
+    <>
+      {renderContent()}
 
-      {/* Floating Action Button */}
-      <button className={styles.fab} onClick={openCreateModal}>
-        +
-      </button>
-
-      {/* Create Project Modal */}
+      {/* Create Project Modal - single instance */}
       {showCreateModal && (
         <div className={styles.modalOverlay} onClick={() => setShowCreateModal(false)}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -199,6 +172,6 @@ export default function ProjectsPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

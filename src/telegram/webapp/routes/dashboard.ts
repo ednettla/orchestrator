@@ -121,18 +121,35 @@ export function createDashboardRouter(): Router {
         failed: allTasks.filter((t) => t.status === 'failed').length,
       };
 
-      // Check execution status
+      // Get plan status (needed for phase calculation)
+      const activePlan = store.getActivePlan(session.id);
+
+      // Check execution status and determine current phase
       const runningTasks = allTasks.filter((t) => t.status === 'running');
       const firstRunningTask = runningTasks[0];
+
+      // Determine actual phase based on state
+      let currentPhase: string | null = null;
+      if (runningTasks.length > 0) {
+        currentPhase = 'coding';
+      } else if (activePlan?.status === 'pending_approval') {
+        currentPhase = 'planning';
+      } else if (requirementStats.pending > 0 || requirementStats.inProgress > 0) {
+        currentPhase = 'pending';
+      } else if (requirementStats.failed > 0) {
+        currentPhase = 'failed';
+      } else if (requirementStats.completed > 0 && requirementStats.pending === 0) {
+        currentPhase = 'completed';
+      }
+
       const executionStats = {
         isRunning: runningTasks.length > 0,
-        currentPhase: runningTasks.length > 0 ? 'executing' : null,
+        currentPhase,
         startedAt: firstRunningTask?.startedAt?.toISOString() ?? null,
         estimatedCompletion: null as string | null,
       };
 
-      // Get plan status
-      const activePlan = store.getActivePlan(session.id);
+      // Plan status for response
       const planStatus = activePlan?.status ?? 'none';
       const hasPendingQuestions = (activePlan?.questions ?? []).some(
         (q: ClarifyingQuestion) => !q.answer

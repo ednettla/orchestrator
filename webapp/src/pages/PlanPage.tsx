@@ -118,6 +118,19 @@ export default function PlanPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (planId: string) => {
+      const response = await api.delete(`/projects/${projectId}/plans/${planId}`);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to delete plan');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plan', projectId] });
+      haptic?.notificationOccurred('success');
+    },
+  });
+
   const handleStartPlan = () => {
     if (goalText.trim()) {
       startPlanMutation.mutate(goalText.trim());
@@ -150,6 +163,13 @@ export default function PlanPage() {
     const confirmed = await showConfirm('Reject this plan?');
     if (confirmed) {
       rejectMutation.mutate();
+    }
+  };
+
+  const handleDelete = async (planId: string) => {
+    const confirmed = await showConfirm('Delete this plan? This cannot be undone.');
+    if (confirmed) {
+      deleteMutation.mutate(planId);
     }
   };
 
@@ -220,9 +240,19 @@ export default function PlanPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <h2 className={styles.title}>Plan</h2>
-        <span className={`${styles.statusBadge} ${styles[plan!.status]}`}>
-          {plan!.status}
-        </span>
+        <div className={styles.headerActions}>
+          <span className={`${styles.statusBadge} ${styles[plan!.status]}`}>
+            {plan!.status}
+          </span>
+          <button
+            className={styles.deleteButton}
+            onClick={() => handleDelete(plan!.id)}
+            disabled={deleteMutation.isPending}
+            title="Delete plan"
+          >
+            {deleteMutation.isPending ? '...' : '🗑️'}
+          </button>
+        </div>
       </div>
 
       <div className={styles.goal}>
@@ -265,7 +295,10 @@ export default function PlanPage() {
                       </button>
                       <button
                         className={styles.cancelButton}
-                        onClick={() => setAnsweringId(null)}
+                        onClick={() => {
+                          setAnsweringId(null);
+                          setAnswerText('');
+                        }}
                       >
                         Cancel
                       </button>

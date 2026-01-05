@@ -336,17 +336,15 @@ export async function updateRequirementText(
     return { success: false, output: '', error: 'Project not initialized' };
   }
 
-  try {
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
 
+  try {
     const result = db.prepare(`
       UPDATE requirements
       SET title = ?, raw_input = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(newText, newText, requirementId);
-
-    db.close();
 
     if (result.changes === 0) {
       return { success: false, output: '', error: 'Requirement not found' };
@@ -359,6 +357,8 @@ export async function updateRequirementText(
       output: '',
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 
@@ -381,17 +381,15 @@ export async function updateRequirementPriority(
     return { success: false, output: '', error: 'Priority must be between 0 and 10' };
   }
 
-  try {
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
 
+  try {
     const result = db.prepare(`
       UPDATE requirements
       SET priority = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(priority, requirementId);
-
-    db.close();
 
     if (result.changes === 0) {
       return { success: false, output: '', error: 'Requirement not found' };
@@ -404,6 +402,8 @@ export async function updateRequirementPriority(
       output: '',
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 
@@ -420,32 +420,32 @@ export async function deleteRequirement(
     return { success: false, output: '', error: 'Project not initialized' };
   }
 
-  try {
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
 
+  try {
     // First check if requirement exists and is not in_progress
     const req = db.prepare(`
       SELECT status FROM requirements WHERE id = ?
     `).get(requirementId) as { status: string } | undefined;
 
     if (!req) {
-      db.close();
       return { success: false, output: '', error: 'Requirement not found' };
     }
 
     if (req.status === 'in_progress') {
-      db.close();
       return { success: false, output: '', error: 'Cannot delete in-progress requirement' };
     }
 
-    // Delete associated tasks first
-    db.prepare(`DELETE FROM tasks WHERE requirement_id = ?`).run(requirementId);
+    // Use transaction to ensure both deletes succeed or fail together
+    const deleteInTransaction = db.transaction(() => {
+      // Delete associated tasks first
+      db.prepare(`DELETE FROM tasks WHERE requirement_id = ?`).run(requirementId);
+      // Delete the requirement
+      return db.prepare(`DELETE FROM requirements WHERE id = ?`).run(requirementId);
+    });
 
-    // Delete the requirement
-    const result = db.prepare(`DELETE FROM requirements WHERE id = ?`).run(requirementId);
-
-    db.close();
+    const result = deleteInTransaction();
 
     if (result.changes === 0) {
       return { success: false, output: '', error: 'Requirement not found' };
@@ -458,6 +458,8 @@ export async function deleteRequirement(
       output: '',
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 
@@ -697,17 +699,17 @@ export async function answerPlanQuestionFromApi(
   questionId: string,
   answer: string
 ): Promise<ApiResult> {
+  // Store answer in the database
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, error: 'Project not initialized' };
+  }
+
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
+
   try {
-    // Store answer in the database
-    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
-
-    if (!existsSync(dbPath)) {
-      return { success: false, error: 'Project not initialized' };
-    }
-
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
-
     // Update the plan artifact with the answer
     const session = db.prepare(`
       SELECT id FROM sessions
@@ -716,7 +718,6 @@ export async function answerPlanQuestionFromApi(
     `).get(projectPath) as { id: string } | undefined;
 
     if (!session) {
-      db.close();
       return { success: false, error: 'No active session' };
     }
 
@@ -726,12 +727,17 @@ export async function answerPlanQuestionFromApi(
     `).get(session.id) as { content: string } | undefined;
 
     if (!artifact) {
-      db.close();
       return { success: false, error: 'No active plan' };
     }
 
-    const planData = JSON.parse(artifact.content);
-    const questions = planData.clarifyingQuestions ?? [];
+    let planData: Record<string, unknown>;
+    try {
+      planData = JSON.parse(artifact.content);
+    } catch {
+      return { success: false, error: 'Invalid plan data' };
+    }
+
+    const questions = (planData.clarifyingQuestions as Array<{ id: string; answered?: boolean; answer?: string }>) ?? [];
 
     // Find and answer the question
     let answered = false;
@@ -745,7 +751,6 @@ export async function answerPlanQuestionFromApi(
     }
 
     if (!answered) {
-      db.close();
       return { success: false, error: 'Question not found or already answered' };
     }
 
@@ -757,9 +762,7 @@ export async function answerPlanQuestionFromApi(
       WHERE session_id = ? AND type = 'plan'
     `).run(JSON.stringify(planData), session.id);
 
-    db.close();
-
-    const remaining = questions.filter((q: { answered?: boolean }) => !q.answered).length;
+    const remaining = questions.filter((q) => !q.answered).length;
 
     return {
       success: true,
@@ -770,6 +773,8 @@ export async function answerPlanQuestionFromApi(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 
@@ -777,16 +782,16 @@ export async function answerPlanQuestionFromApi(
  * Approve a plan (for WebApp API)
  */
 export async function approvePlanFromApi(projectPath: string): Promise<ApiResult> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, error: 'Project not initialized' };
+  }
+
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
+
   try {
-    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
-
-    if (!existsSync(dbPath)) {
-      return { success: false, error: 'Project not initialized' };
-    }
-
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
-
     // Update session status to approved
     const result = db.prepare(`
       UPDATE sessions
@@ -794,8 +799,6 @@ export async function approvePlanFromApi(projectPath: string): Promise<ApiResult
       WHERE project_path = ?
       AND status = 'pending_approval'
     `).run(projectPath);
-
-    db.close();
 
     if (result.changes === 0) {
       return { success: false, error: 'No pending plan to approve' };
@@ -807,6 +810,8 @@ export async function approvePlanFromApi(projectPath: string): Promise<ApiResult
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 
@@ -817,16 +822,16 @@ export async function rejectPlanFromApi(
   projectPath: string,
   reason?: string
 ): Promise<ApiResult> {
+  const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
+
+  if (!existsSync(dbPath)) {
+    return { success: false, error: 'Project not initialized' };
+  }
+
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(dbPath);
+
   try {
-    const dbPath = path.join(projectPath, '.orchestrator', 'orchestrator.db');
-
-    if (!existsSync(dbPath)) {
-      return { success: false, error: 'Project not initialized' };
-    }
-
-    const Database = (await import('better-sqlite3')).default;
-    const db = new Database(dbPath);
-
     // Update session status to idle (rejected)
     const result = db.prepare(`
       UPDATE sessions
@@ -850,20 +855,22 @@ export async function rejectPlanFromApi(
         `).get(session.id) as { content: string } | undefined;
 
         if (artifact) {
-          const planData = JSON.parse(artifact.content);
-          planData.rejectionReason = reason;
-          planData.status = 'rejected';
+          try {
+            const planData = JSON.parse(artifact.content);
+            planData.rejectionReason = reason;
+            planData.status = 'rejected';
 
-          db.prepare(`
-            UPDATE artifacts
-            SET content = ?, updated_at = datetime('now')
-            WHERE session_id = ? AND type = 'plan'
-          `).run(JSON.stringify(planData), session.id);
+            db.prepare(`
+              UPDATE artifacts
+              SET content = ?, updated_at = datetime('now')
+              WHERE session_id = ? AND type = 'plan'
+            `).run(JSON.stringify(planData), session.id);
+          } catch {
+            // Ignore JSON parse errors for rejection reason storage
+          }
         }
       }
     }
-
-    db.close();
 
     if (result.changes === 0) {
       return { success: false, error: 'No pending plan to reject' };
@@ -875,6 +882,8 @@ export async function rejectPlanFromApi(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  } finally {
+    db.close();
   }
 }
 

@@ -393,5 +393,66 @@ export function createPlansRouter(): Router {
     }
   );
 
+  // --------------------------------------------------------------------------
+  // Delete Plan
+  // --------------------------------------------------------------------------
+
+  router.delete(
+    '/:planId',
+    requireRole('admin'),
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const projectId = req.params.projectId as string;
+        const planId = req.params.planId as string;
+
+        const context = getProjectStore(projectId);
+        if (!context) {
+          res.status(404).json({
+            success: false,
+            error: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' },
+          });
+          return;
+        }
+
+        const { store, project } = context;
+
+        try {
+          const session = store.getSessionByPath(project.path);
+          if (!session) {
+            res.status(404).json({
+              success: false,
+              error: { code: 'SESSION_NOT_FOUND', message: 'Project not initialized' },
+            });
+            return;
+          }
+
+          // Delete the plan
+          const deleted = store.deletePlan(planId);
+
+          if (!deleted) {
+            res.status(404).json({
+              success: false,
+              error: { code: 'PLAN_NOT_FOUND', message: 'Plan not found' },
+            });
+            return;
+          }
+
+          res.json({
+            success: true,
+            message: 'Plan deleted',
+          });
+        } finally {
+          store.close();
+        }
+      } catch (error) {
+        console.error('[API] Error deleting plan:', error);
+        res.status(500).json({
+          success: false,
+          error: { code: 'INTERNAL_ERROR', message: 'Failed to delete plan' },
+        });
+      }
+    }
+  );
+
   return router;
 }

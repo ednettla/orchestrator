@@ -93,6 +93,7 @@ export interface StateStore {
   getPlansBySession(sessionId: string): Plan[];
   getActivePlan(sessionId: string): Plan | null;
   updatePlan(id: string, updates: Partial<UpdatePlanParams>): Plan;
+  deletePlan(id: string): boolean;
 
   // Cloud service link operations
   createCloudServiceLink(params: CreateCloudServiceLinkParams): CloudServiceLink;
@@ -919,6 +920,11 @@ export class SQLiteStore implements StateStore {
     const plan = this.getPlan(id);
     if (!plan) throw new Error('Plan not found');
     return plan;
+  }
+
+  deletePlan(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+    return result.changes > 0;
   }
 
   // --------------------------------------------------------------------------

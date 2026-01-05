@@ -33,6 +33,48 @@ import {
 } from '../keyboards.js';
 
 // ============================================================================
+// Safe Message Edit Helper
+// ============================================================================
+
+/**
+ * Safely edit a message, handling common Telegram API errors gracefully.
+ * Returns true if edit succeeded, false if it failed due to a non-critical error.
+ */
+async function safeEditMessage(
+  ctx: Context,
+  text: string,
+  options?: Parameters<Context['editMessageText']>[1]
+): Promise<boolean> {
+  try {
+    await safeEditMessage(ctx,text, options);
+    return true;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    // Ignore "message is not modified" - content unchanged
+    if (message.includes('message is not modified')) {
+      return true;
+    }
+
+    // Ignore "message to edit not found" - message was deleted
+    if (message.includes('message to edit not found') ||
+        message.includes('MESSAGE_ID_INVALID')) {
+      console.warn('[Callback] Message was deleted, cannot edit');
+      return false;
+    }
+
+    // Ignore "message can\'t be edited" - too old or no permission
+    if (message.includes("message can't be edited")) {
+      console.warn('[Callback] Message cannot be edited');
+      return false;
+    }
+
+    // Re-throw unexpected errors
+    throw error;
+  }
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -201,7 +243,7 @@ async function handleStatus(ctx: Context, data: CallbackData): Promise<void> {
     lines.push('', `_Last activity: ${status.lastActivity}_`);
   }
 
-  await ctx.editMessageText(lines.join('\n'), {
+  await safeEditMessage(ctx,lines.join('\n'), {
     parse_mode: 'Markdown',
     reply_markup: projectActionsKeyboard(project.name),
   });
@@ -217,7 +259,7 @@ async function handlePlanView(ctx: Context, data: CallbackData): Promise<void> {
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `📋 *Plan for ${project.name}*\n\n` +
       `To create a new plan, use:\n` +
       `\`/${project.name} plan "your goal"\`\n\n` +
@@ -257,7 +299,7 @@ async function handleRunConfirm(ctx: Context, data: CallbackData): Promise<void>
     .text('▶️ Start Execution', `start_run:${project.name}`)
     .text('❌ Cancel', `cancel:${project.name}`);
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `▶️ *Start Execution?*\n\n` +
       `Project: ${project.name}\n` +
       `Pending: ${status.requirements.pending} requirements\n\n` +
@@ -291,7 +333,7 @@ async function handleStopConfirm(ctx: Context, data: CallbackData): Promise<void
     .text('⏹ Confirm Stop', `confirm_stop:${project.name}`)
     .text('❌ Cancel', `cancel:${project.name}`);
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `⏹ *Stop Daemon?*\n\n` +
       `Project: ${project.name}\n` +
       `PID: ${daemonStatus.pid}\n\n` +
@@ -316,7 +358,7 @@ async function handleLogs(ctx: Context, data: CallbackData): Promise<void> {
   const logs = await getRecentLogs(project.path, 15);
 
   if (logs.length === 0) {
-    await ctx.editMessageText(`📝 *Logs for ${project.name}*\n\n_No logs yet._`, {
+    await safeEditMessage(ctx,`📝 *Logs for ${project.name}*\n\n_No logs yet._`, {
       parse_mode: 'Markdown',
       reply_markup: projectActionsKeyboard(project.name),
     });
@@ -326,7 +368,7 @@ async function handleLogs(ctx: Context, data: CallbackData): Promise<void> {
 
   const formattedLogs = logs.slice(-10).map((line) => `\`${truncate(line, 60)}\``).join('\n');
 
-  await ctx.editMessageText(`📝 *Recent Logs*\n\n${formattedLogs}`, {
+  await safeEditMessage(ctx,`📝 *Recent Logs*\n\n${formattedLogs}`, {
     parse_mode: 'Markdown',
     reply_markup: logsNavigationKeyboard(project.name, { hasMore: logs.length >= 15 }),
   });
@@ -342,7 +384,7 @@ async function handleConfig(ctx: Context, data: CallbackData): Promise<void> {
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `⚙️ *Configuration: ${project.name}*\n\n` +
       `Path: \`${project.path}\`\n` +
       `Alias: ${project.alias ?? '_none_'}\n\n` +
@@ -376,7 +418,7 @@ async function handleSelect(ctx: Context, data: CallbackData, telegramId: number
   const status = await getProjectStatus(project.path);
   const phaseEmoji = getPhaseEmoji(status.phase);
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `✅ *Active: ${project.name}*\n\n` +
       `${phaseEmoji} Phase: ${status.phase}\n` +
       `📊 Requirements: ${status.requirements.pending} pending, ${status.requirements.completed} done\n\n` +
@@ -394,22 +436,28 @@ async function handleSelect(ctx: Context, data: CallbackData, telegramId: number
 // ============================================================================
 
 async function handleApprove(ctx: Context, data: CallbackData): Promise<void> {
+  // Answer immediately to prevent double-click issues
+  await ctx.answerCallbackQuery({ text: 'Approving...' });
+
   const registry = getProjectRegistry();
   const project = registry.getProject(data.projectName ?? '');
 
   if (!project) {
-    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    await safeEditMessage(ctx, '❌ Project not found', { parse_mode: 'Markdown' });
     return;
   }
 
   const result = await approvePlanFromApi(project.path);
 
   if (!result.success) {
-    await ctx.answerCallbackQuery({ text: result.error ?? 'Failed to approve', show_alert: true });
+    await safeEditMessage(ctx,
+      `❌ *Approval Failed*\n\n${result.error ?? 'Unknown error'}`,
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `✅ *Plan Approved!*\n\n` +
       `Project: ${project.name}\n\n` +
       `Use the ▶️ Run button to start execution.`,
@@ -418,33 +466,37 @@ async function handleApprove(ctx: Context, data: CallbackData): Promise<void> {
       reply_markup: projectActionsKeyboard(project.name),
     }
   );
-  await ctx.answerCallbackQuery({ text: 'Plan approved!' });
 }
 
 async function handleReject(ctx: Context, data: CallbackData): Promise<void> {
+  // Answer immediately to prevent double-click issues
+  await ctx.answerCallbackQuery({ text: 'Rejecting...' });
+
   const registry = getProjectRegistry();
   const project = registry.getProject(data.projectName ?? '');
 
   if (!project) {
-    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    await safeEditMessage(ctx, '❌ Project not found', { parse_mode: 'Markdown' });
     return;
   }
 
   const result = await rejectPlanFromApi(project.path);
 
   if (!result.success) {
-    await ctx.answerCallbackQuery({ text: result.error ?? 'Failed to reject', show_alert: true });
+    await safeEditMessage(ctx,
+      `❌ *Rejection Failed*\n\n${result.error ?? 'Unknown error'}`,
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `❌ *Plan Rejected*\n\n` +
       `Project: ${project.name}\n\n` +
       `Create a new plan with:\n` +
       `\`/${project.name} plan "new goal"\``,
     { parse_mode: 'Markdown' }
   );
-  await ctx.answerCallbackQuery({ text: 'Plan rejected' });
 }
 
 async function handlePlanDetails(ctx: Context, data: CallbackData): Promise<void> {
@@ -460,7 +512,7 @@ async function handleStartPlan(ctx: Context, data: CallbackData): Promise<void> 
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `🚀 *Starting Planning*\n\n` +
       `Project: ${project.name}\n\n` +
       `_Analyzing requirements..._`,
@@ -470,7 +522,7 @@ async function handleStartPlan(ctx: Context, data: CallbackData): Promise<void> 
   const result = await startPlan(project.path, '');
 
   if (!result.success) {
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       `❌ *Planning Failed*\n\n` + `Error: ${result.error ?? result.output}`,
       { parse_mode: 'Markdown' }
     );
@@ -478,7 +530,7 @@ async function handleStartPlan(ctx: Context, data: CallbackData): Promise<void> 
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `🚀 *Planning Started*\n\n` +
       `Project: ${project.name}\n\n` +
       `The planner is running in the background.\n` +
@@ -496,30 +548,42 @@ async function handleStartPlan(ctx: Context, data: CallbackData): Promise<void> 
 // ============================================================================
 
 async function handleStartRun(ctx: Context, data: CallbackData): Promise<void> {
+  // Answer immediately to prevent double-click issues
+  await ctx.answerCallbackQuery({ text: 'Starting...' });
+
   const registry = getProjectRegistry();
   const project = registry.getProject(data.projectName ?? '');
 
   if (!project) {
-    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    await safeEditMessage(ctx, '❌ Project not found', { parse_mode: 'Markdown' });
     return;
   }
 
-  await ctx.editMessageText(`▶️ *Starting Execution*\n\n_Please wait..._`, {
+  // Check if already running (idempotency)
+  const daemonStatus = await getDaemonStatus(project.path);
+  if (daemonStatus.running) {
+    await safeEditMessage(ctx,
+      `✅ *Already Running*\n\nProject: ${project.name}\nPID: ${daemonStatus.pid}`,
+      { parse_mode: 'Markdown', reply_markup: projectActionsKeyboard(project.name) }
+    );
+    return;
+  }
+
+  await safeEditMessage(ctx,`▶️ *Starting Execution*\n\n_Please wait..._`, {
     parse_mode: 'Markdown',
   });
 
   const result = await startRun(project.path);
 
   if (!result.success) {
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       `❌ *Failed to Start*\n\n` + `Error: ${result.error ?? result.output}`,
       { parse_mode: 'Markdown' }
     );
-    await ctx.answerCallbackQuery({ text: 'Failed to start' });
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `▶️ *Execution Started*\n\n` +
       `Project: ${project.name}\n\n` +
       `The daemon is now running in the background.\n` +
@@ -529,30 +593,44 @@ async function handleStartRun(ctx: Context, data: CallbackData): Promise<void> {
       reply_markup: projectActionsKeyboard(project.name),
     }
   );
-  await ctx.answerCallbackQuery({ text: 'Started!' });
 }
 
 async function handleConfirmStop(ctx: Context, data: CallbackData): Promise<void> {
+  // Answer immediately to prevent double-click issues
+  await ctx.answerCallbackQuery({ text: 'Stopping...' });
+
   const registry = getProjectRegistry();
   const project = registry.getProject(data.projectName ?? '');
 
   if (!project) {
-    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    await safeEditMessage(ctx, '❌ Project not found', { parse_mode: 'Markdown' });
+    return;
+  }
+
+  // Check if already stopped (idempotency)
+  const daemonStatus = await getDaemonStatus(project.path);
+  if (!daemonStatus.running) {
+    await safeEditMessage(ctx,
+      `⏹ *Already Stopped*\n\nProject: ${project.name}`,
+      { parse_mode: 'Markdown', reply_markup: projectActionsKeyboard(project.name) }
+    );
     return;
   }
 
   const result = await stopDaemon(project.path);
 
   if (!result.success) {
-    await ctx.answerCallbackQuery({ text: result.error ?? 'Failed to stop', show_alert: true });
+    await safeEditMessage(ctx,
+      `❌ *Failed to Stop*\n\n${result.error ?? 'Unknown error'}`,
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
 
-  await ctx.editMessageText(`⏹ *Daemon Stopped*\n\nProject: ${project.name}`, {
+  await safeEditMessage(ctx,`⏹ *Daemon Stopped*\n\nProject: ${project.name}`, {
     parse_mode: 'Markdown',
     reply_markup: projectActionsKeyboard(project.name),
   });
-  await ctx.answerCallbackQuery({ text: 'Stopped' });
 }
 
 // ============================================================================
@@ -574,7 +652,7 @@ async function handleLogsMore(ctx: Context, data: CallbackData): Promise<void> {
   const displayLogs = logs.slice(Math.max(0, logs.length - 20));
   const formattedLogs = displayLogs.map((line) => `\`${truncate(line, 60)}\``).join('\n');
 
-  await ctx.editMessageText(`📝 *Logs (${displayLogs.length} lines)*\n\n${formattedLogs}`, {
+  await safeEditMessage(ctx,`📝 *Logs (${displayLogs.length} lines)*\n\n${formattedLogs}`, {
     parse_mode: 'Markdown',
     reply_markup: logsNavigationKeyboard(project.name, {
       hasMore: logs.length >= offset + 20,
@@ -610,7 +688,7 @@ async function handleReqDetails(ctx: Context, data: CallbackData): Promise<void>
 
   const statusEmoji = getStatusEmoji(req.status);
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `${statusEmoji} *Requirement*\n\n` +
       `${req.title}\n\n` +
       `Status: ${req.status}\n` +
@@ -636,7 +714,7 @@ async function handleReqAll(ctx: Context, data: CallbackData): Promise<void> {
   const reqs = await getRequirements(project.path);
 
   if (reqs.length === 0) {
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       `📋 *Requirements: ${project.name}*\n\n` +
         `_No requirements yet._\n\n` +
         `Add one with:\n` +
@@ -653,7 +731,7 @@ async function handleReqAll(ctx: Context, data: CallbackData): Promise<void> {
     lines.push(`${emoji} ${truncate(req.title, 40)}`);
   }
 
-  await ctx.editMessageText(lines.join('\n'), {
+  await safeEditMessage(ctx,lines.join('\n'), {
     parse_mode: 'Markdown',
     reply_markup: requirementsListKeyboard(project.name, reqs),
   });
@@ -691,7 +769,7 @@ async function handleEditReq(ctx: Context, data: CallbackData): Promise<void> {
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `✏️ *Edit Requirement*\n\n` +
       `To edit this requirement, use:\n` +
       `\`/${project.name} edit ${data.requirementId} "new text"\`\n\n` +
@@ -730,7 +808,7 @@ async function handleConfigSettings(ctx: Context, data: CallbackData): Promise<v
     .filter(Boolean)
     .join(' + ');
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `🔧 *Project Settings*\n\n` +
       `Name: ${project.name}\n` +
       `Alias: ${project.alias ?? '_none_'}\n` +
@@ -773,7 +851,7 @@ async function handleConfigMcp(ctx: Context, data: CallbackData): Promise<void> 
   const serverNames = Object.keys(mcpServers);
 
   if (serverNames.length === 0) {
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       `🔌 *MCP Servers*\n\n` +
         `_No MCP servers configured._\n\n` +
         `Configure in \`.orchestrator/config.json\``,
@@ -793,7 +871,7 @@ async function handleConfigMcp(ctx: Context, data: CallbackData): Promise<void> 
     lines.push(`${status} ${name}`);
   }
 
-  await ctx.editMessageText(lines.join('\n'), {
+  await safeEditMessage(ctx,lines.join('\n'), {
     parse_mode: 'Markdown',
     reply_markup: configMenuKeyboard(project.name),
   });
@@ -809,7 +887,7 @@ async function handleConfigSecrets(ctx: Context, data: CallbackData): Promise<vo
     return;
   }
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `🔐 *Secrets*\n\n` +
       `_Secret values are hidden for security._\n\n` +
       `Manage secrets with:\n` +
@@ -848,7 +926,7 @@ async function handleConfigCloud(ctx: Context, data: CallbackData): Promise<void
     lines.push('_No cloud services configured._');
   }
 
-  await ctx.editMessageText(lines.join('\n'), {
+  await safeEditMessage(ctx,lines.join('\n'), {
     parse_mode: 'Markdown',
     reply_markup: configMenuKeyboard(project.name),
   });
@@ -860,7 +938,7 @@ async function handleConfigCloud(ctx: Context, data: CallbackData): Promise<void
 // ============================================================================
 
 async function handleCancel(ctx: Context): Promise<void> {
-  await ctx.editMessageText('_Cancelled._', { parse_mode: 'Markdown' });
+  await safeEditMessage(ctx,'_Cancelled._', { parse_mode: 'Markdown' });
   await ctx.answerCallbackQuery();
 }
 

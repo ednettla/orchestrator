@@ -4,8 +4,8 @@
  * Container for project detail tabs.
  */
 
-import { Outlet, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { Outlet, useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 
 interface Project {
@@ -22,6 +22,8 @@ interface ProjectResponse {
 
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data: project, isLoading, error } = useQuery({
     queryKey: ['project', projectId],
@@ -44,9 +46,43 @@ export default function ProjectPage() {
   }
 
   if (error || !project) {
+    const handleRetry = () => {
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    };
+
     return (
-      <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--status-failed)' }}>
-        Failed to load project
+      <div style={{ textAlign: 'center', padding: '2rem' }}>
+        <div style={{ color: 'var(--status-failed)', marginBottom: '1rem' }}>
+          Failed to load project
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+          <button
+            onClick={handleRetry}
+            style={{
+              padding: '0.5rem 1rem',
+              background: 'var(--button-color)',
+              color: 'var(--button-text-color)',
+              border: 'none',
+              borderRadius: 'var(--border-radius-sm)',
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => navigate('/projects')}
+            style={{
+              padding: '0.5rem 1rem',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: 'var(--text-color)',
+              border: 'none',
+              borderRadius: 'var(--border-radius-sm)',
+              cursor: 'pointer',
+            }}
+          >
+            Back to Projects
+          </button>
+        </div>
       </div>
     );
   }

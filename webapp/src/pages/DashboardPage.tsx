@@ -6,8 +6,9 @@
 
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useTelegram } from '../hooks/useTelegram';
 import styles from './DashboardPage.module.css';
 
 interface DashboardStats {
@@ -80,6 +81,8 @@ interface LogsResponse {
 export default function DashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState<'activity' | 'logs'>('activity');
+  const queryClient = useQueryClient();
+  const { haptic, showConfirm } = useTelegram();
 
   const { data: dashboard, isLoading: dashboardLoading } = useQuery({
     queryKey: ['dashboard', projectId],
@@ -122,6 +125,46 @@ export default function DashboardPage() {
     refetchInterval: activeTab === 'logs' ? 5000 : false, // Auto-refresh logs
   });
 
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/projects/${projectId}/dashboard/start`);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to start execution');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard', projectId] });
+      haptic?.notificationOccurred('success');
+    },
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/projects/${projectId}/dashboard/stop`);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to stop execution');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard', projectId] });
+      haptic?.notificationOccurred('success');
+    },
+  });
+
+  const handleStart = async () => {
+    const confirmed = await showConfirm('Start execution for this project?');
+    if (confirmed) {
+      startMutation.mutate();
+    }
+  };
+
+  const handleStop = async () => {
+    const confirmed = await showConfirm('Stop execution?');
+    if (confirmed) {
+      stopMutation.mutate();
+    }
+  };
+
   if (dashboardLoading) {
     return <div className={styles.loading}>Loading dashboard...</div>;
   }
@@ -150,6 +193,25 @@ export default function DashboardPage() {
             Running: {stats.execution.currentPhase}
           </div>
         )}
+        <div className={styles.executionControls}>
+          {stats.execution.isRunning ? (
+            <button
+              className={styles.stopButton}
+              onClick={handleStop}
+              disabled={stopMutation.isPending}
+            >
+              {stopMutation.isPending ? 'Stopping...' : 'Stop Execution'}
+            </button>
+          ) : (
+            <button
+              className={styles.startButton}
+              onClick={handleStart}
+              disabled={startMutation.isPending}
+            >
+              {startMutation.isPending ? 'Starting...' : 'Start Execution'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats Grid */}
