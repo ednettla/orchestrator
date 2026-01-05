@@ -26,6 +26,10 @@ export interface RunFlowContext extends FlowContext {
   customConcurrency?: number;
   /** Selected action */
   selectedAction?: string;
+  /** Stop result (used when stopping daemon) */
+  stopResult?: { success: boolean; error?: string };
+  /** Error message if any */
+  error?: string;
 }
 
 /**
@@ -285,6 +289,48 @@ export const runFlow: Flow<RunFlowContext> = {
         format: 'success',
       }),
       handle: async () => 'menu',
+    },
+
+    // ========================================================================
+    // Stop Daemon Result (shared with daemon flow via action handler)
+    // ========================================================================
+    stop_result: {
+      id: 'stop_result',
+      interaction: (ctx) => {
+        const result = ctx.stopResult;
+        if (result?.success) {
+          return {
+            type: 'display',
+            message: 'Daemon stopped successfully.',
+            format: 'success',
+          };
+        }
+        return {
+          type: 'display',
+          message: `Failed to stop daemon: ${result?.error ?? 'Unknown error'}`,
+          format: 'error',
+        };
+      },
+      handle: async (_, ctx) => {
+        delete ctx.stopResult;
+        return 'menu';
+      },
+    },
+
+    // ========================================================================
+    // Error Handling
+    // ========================================================================
+    error: {
+      id: 'error',
+      interaction: (ctx) => ({
+        type: 'display',
+        message: ctx.error ?? 'An error occurred',
+        format: 'error',
+      }),
+      handle: async (_, ctx) => {
+        delete ctx.error;
+        return 'menu';
+      },
     },
   },
 };
