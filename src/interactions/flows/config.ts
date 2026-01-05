@@ -15,6 +15,12 @@ import type { Flow, FlowContext, SelectOption } from '../types.js';
 export interface ConfigFlowContext extends FlowContext {
   /** Selected action */
   selectedAction?: string;
+  /** MCP wizard state */
+  mcpServerName?: string;
+  mcpTransport?: 'stdio' | 'http' | 'sse';
+  mcpCommand?: string;
+  mcpArgs?: string;
+  mcpUrl?: string;
 }
 
 /**
@@ -147,7 +153,7 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
         if (!response || typeof response !== 'string') {
           return 'menu';
         }
-        (ctx as any).mcpServerName = response;
+        ctx.mcpServerName = response;
         return 'add_transport';
       },
     },
@@ -168,7 +174,7 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
         if (response === 'back') {
           return 'menu';
         }
-        (ctx as any).mcpTransport = response;
+        ctx.mcpTransport = response as 'stdio' | 'http' | 'sse';
 
         if (response === 'stdio') {
           return 'add_command';
@@ -185,7 +191,7 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
         placeholder: 'npx',
       }),
       handle: async (response, ctx) => {
-        (ctx as any).mcpCommand = response ?? 'npx';
+        ctx.mcpCommand = (response as string | null) ?? 'npx';
         return 'add_args';
       },
     },
@@ -198,7 +204,7 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
         placeholder: '-y @supabase/mcp-server',
       }),
       handle: async (response, ctx) => {
-        (ctx as any).mcpArgs = response ?? '';
+        ctx.mcpArgs = (response as string | null) ?? '';
         return 'add_confirm';
       },
     },
@@ -215,7 +221,7 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
         if (!response || typeof response !== 'string') {
           return 'add_transport';
         }
-        (ctx as any).mcpUrl = response;
+        ctx.mcpUrl = response;
         return 'add_confirm';
       },
     },
@@ -223,8 +229,8 @@ export const mcpFlow: Flow<ConfigFlowContext> = {
     add_confirm: {
       id: 'add_confirm',
       interaction: (ctx) => {
-        const name = (ctx as any).mcpServerName;
-        const transport = (ctx as any).mcpTransport;
+        const name = ctx.mcpServerName;
+        const transport = ctx.mcpTransport;
 
         return {
           type: 'confirm',
