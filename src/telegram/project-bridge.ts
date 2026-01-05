@@ -193,7 +193,8 @@ interface CommandResult {
 export async function executeCommand(
   projectPath: string,
   command: string,
-  args: string[] = []
+  args: string[] = [],
+  timeoutMs: number = 60000
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     const proc = spawn('orchestrate', [command, '-p', projectPath, ...args], {
@@ -203,6 +204,19 @@ export async function executeCommand(
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        proc.kill('SIGTERM');
+        resolve({
+          success: false,
+          output: stdout.trim(),
+          error: `Command timed out after ${timeoutMs / 1000}s`,
+        });
+      }
+    }, timeoutMs);
 
     proc.stdout.on('data', (data: Buffer) => {
       stdout += data.toString();
@@ -213,19 +227,27 @@ export async function executeCommand(
     });
 
     proc.on('close', (code) => {
-      resolve({
-        success: code === 0,
-        output: stdout.trim(),
-        error: stderr.trim() || undefined,
-      });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve({
+          success: code === 0,
+          output: stdout.trim(),
+          error: stderr.trim() || undefined,
+        });
+      }
     });
 
     proc.on('error', (err) => {
-      resolve({
-        success: false,
-        output: '',
-        error: err.message,
-      });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve({
+          success: false,
+          output: '',
+          error: err.message,
+        });
+      }
     });
   });
 }
@@ -1006,8 +1028,12 @@ export async function createProject(
     };
   }
 
-  // Initialize project
-  const initResult = await executeCommand(projectPath, 'init', ['--name', projectName]);
+  // Initialize project (non-interactive mode for Telegram)
+  const initResult = await executeCommand(projectPath, 'init', [
+    '--name', projectName,
+    '--no-interactive',
+    '--no-cloud',
+  ]);
 
   if (!initResult.success) {
     return {
