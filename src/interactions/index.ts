@@ -48,6 +48,13 @@ export {
   printContextInfo,
 } from './renderers/cli.js';
 
+// TUI Renderer (full-screen Ink-based)
+export {
+  createTuiRenderer,
+  updateTuiProjectName,
+  exitTui,
+} from './renderers/tui.js';
+
 // Telegram Renderer
 export {
   createTelegramRenderer,

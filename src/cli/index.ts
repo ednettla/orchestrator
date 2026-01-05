@@ -348,8 +348,10 @@ registerTelegramCommand(program);
 // ============================================================================
 
 // Show interactive menu when no command is provided
-program.action(async () => {
-  await mainMenuCommand({ path: process.cwd() });
-});
+program
+  .option('--tui', 'Use full-screen terminal UI (experimental)')
+  .action(async (opts) => {
+    await mainMenuCommand({ path: process.cwd(), tui: opts.tui });
+  });
 
 program.parse();

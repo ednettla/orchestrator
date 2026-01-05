@@ -8,6 +8,7 @@ import type { Plan } from '../../core/types.js';
 import {
   FlowRunner,
   cliRenderer,
+  createTuiRenderer,
   buildFlowContext,
   createCliUser,
   mainMenuFlow,
@@ -33,7 +34,7 @@ import {
   // Flow registry
   getFlow,
 } from '../../interactions/index.js';
-import type { MainMenuContext, DaemonFlowContext, RunFlowContext, RequirementsFlowContext, PlanFlowContext, ConfigFlowContext, InitFlowContext, WorktreesFlowContext, SecretsFlowContext, ProjectsFlowContext, TelegramSettingsFlowContext } from '../../interactions/index.js';
+import type { MainMenuContext, DaemonFlowContext, RunFlowContext, RequirementsFlowContext, PlanFlowContext, ConfigFlowContext, InitFlowContext, WorktreesFlowContext, SecretsFlowContext, ProjectsFlowContext, TelegramSettingsFlowContext, Renderer } from '../../interactions/index.js';
 
 interface MenuContext {
   hasProject: boolean;
@@ -241,18 +242,214 @@ async function runUnifiedSubFlow(
 }
 
 // ============================================================================
+// TUI Menu (Full-screen mode)
+// ============================================================================
+
+async function runTuiMenu(
+  renderer: Renderer,
+  flowContext: MainMenuContext,
+  projectPath: string,
+  cleanup: () => void
+): Promise<void> {
+  const runner = new FlowRunner(mainMenuFlow, renderer, flowContext);
+
+  try {
+    while (true) {
+      const response = await runner.runCurrentStep();
+
+      // Handle cancellation
+      if (response === null) {
+        const step = runner.getCurrentStep();
+        const interaction = step?.interaction(runner.getContext());
+
+        if (interaction?.type === 'display') {
+          const result = await runner.handleResponse(null);
+          if (result.done) break;
+          continue;
+        }
+
+        // User cancelled
+        break;
+      }
+
+      // Handle progress interaction
+      if (response && typeof response === 'object' && 'update' in response) {
+        const result = await runner.handleResponse(response);
+        if (result.done) break;
+        continue;
+      }
+
+      // Handle response
+      const result = await runner.handleResponse(response);
+
+      // Check for sub-flow navigation
+      const currentStepId = runner.getCurrentStepId();
+      if (currentStepId.startsWith('flow:')) {
+        const subFlowId = getSubFlowId(currentStepId);
+        const ctx = runner.getContext() as MainMenuContext;
+
+        // Route to unified flows
+        switch (subFlowId) {
+          case 'init':
+            await runTuiSubFlow(initFlow, ctx as InitFlowContext, projectPath, renderer);
+            break;
+          case 'plan':
+            await runTuiSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath, renderer);
+            break;
+          case 'run':
+            await runTuiSubFlow(runFlow, ctx as RunFlowContext, projectPath, renderer);
+            break;
+          case 'requirements':
+            await runTuiSubFlow(requirementsFlow, ctx as RequirementsFlowContext, projectPath, renderer);
+            break;
+          case 'daemon':
+            await runTuiSubFlow(daemonFlow, ctx as DaemonFlowContext, projectPath, renderer);
+            break;
+          case 'config':
+            await runTuiSubFlow(configFlow, ctx as ConfigFlowContext, projectPath, renderer);
+            break;
+          case 'secrets':
+            await runTuiSubFlow(secretsFlow, ctx as SecretsFlowContext, projectPath, renderer);
+            break;
+          case 'projects':
+            await runTuiSubFlow(projectsFlow, ctx as ProjectsFlowContext, projectPath, renderer);
+            break;
+          case 'telegram':
+            await runTuiSubFlow(telegramSettingsFlow, ctx as TelegramSettingsFlowContext, projectPath, renderer);
+            break;
+        }
+
+        // Navigate back to menu and refresh context
+        runner.navigateTo('menu');
+        const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+        runner.updateContext({ ...refreshed } as MainMenuContext);
+        continue;
+      }
+
+      if (result.done) {
+        break;
+      }
+    }
+  } finally {
+    cleanup();
+  }
+}
+
+/**
+ * Run a sub-flow with the TUI renderer
+ */
+async function runTuiSubFlow(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  flow: any,
+  baseContext: MainMenuContext,
+  projectPath: string,
+  renderer: Renderer
+): Promise<void> {
+  const subRunner = new FlowRunner(flow, renderer, baseContext);
+
+  while (true) {
+    const response = await subRunner.runCurrentStep();
+
+    // Handle cancellation
+    if (response === null) {
+      const step = subRunner.getCurrentStep();
+      const interaction = step?.interaction(subRunner.getContext());
+
+      if (interaction?.type === 'display') {
+        const result = await subRunner.handleResponse(null);
+        if (result.done) break;
+        continue;
+      }
+
+      break;
+    }
+
+    // Handle progress interaction
+    if (response && typeof response === 'object' && 'update' in response) {
+      const result = await subRunner.handleResponse(response);
+      if (result.done) break;
+      continue;
+    }
+
+    // Handle response
+    const result = await subRunner.handleResponse(response);
+
+    // Check for action markers
+    const currentStepId = subRunner.getCurrentStepId();
+    if (isActionMarker(currentStepId)) {
+      const actionName = getActionName(currentStepId);
+      const ctx = subRunner.getContext();
+
+      const actionResult = await executeAction(actionName, ctx, 'cli');
+
+      // Navigate to the step returned by the action
+      let navigated = false;
+      if (actionResult.nextStep) {
+        navigated = subRunner.navigateTo(actionResult.nextStep);
+      }
+      if (!navigated) {
+        subRunner.navigateTo('menu');
+      }
+
+      // Refresh context after action
+      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+      subRunner.updateContext({ ...refreshed, ...ctx });
+      continue;
+    }
+
+    // Check for nested flow markers
+    if (currentStepId.startsWith('flow:')) {
+      const nestedFlowId = getSubFlowId(currentStepId);
+      const ctx = subRunner.getContext();
+
+      switch (nestedFlowId) {
+        case 'run':
+          await runTuiSubFlow(runFlow, ctx as RunFlowContext, projectPath, renderer);
+          break;
+        case 'mcp':
+          await runTuiSubFlow(mcpFlow, ctx as ConfigFlowContext, projectPath, renderer);
+          break;
+        case 'plan':
+          await runTuiSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath, renderer);
+          break;
+        case 'worktrees':
+          await runTuiSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath, renderer);
+          break;
+      }
+
+      // After nested flow, refresh and go back to this flow's menu
+      subRunner.navigateTo('menu');
+      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+      subRunner.updateContext({ ...refreshed, ...ctx });
+      continue;
+    }
+
+    if (result.done) {
+      break;
+    }
+  }
+}
+
+// ============================================================================
 // Main Menu
 // ============================================================================
 
-export async function mainMenuCommand(options: { path: string }): Promise<void> {
+export async function mainMenuCommand(options: { path: string; tui?: boolean }): Promise<void> {
   const projectPath = path.resolve(options.path);
-
-  // Use new unified flow system
-  flowPrintBanner();
 
   // Build flow context
   const baseContext = await buildFlowContext(projectPath, createCliUser(), 'cli');
   const flowContext: MainMenuContext = { ...baseContext };
+
+  // Use TUI renderer if requested
+  if (options.tui) {
+    const { renderer, cleanup } = await createTuiRenderer(flowContext.projectName);
+    await runTuiMenu(renderer, flowContext, projectPath, cleanup);
+    return;
+  }
+
+  // Use classic CLI flow system
+  flowPrintBanner();
 
   // Print context info
   const contextInfo: Parameters<typeof flowPrintContextInfo>[0] = {

@@ -36,6 +36,7 @@
     "chalk": "^5.4.1",
     "commander": "^13.0.0",
     "express": "^5.2.1",
+    "fullscreen-ink": "^0.1.0",
     "grammy": "^1.39.2",
     "ink": "^6.6.0",
     "ink-spinner": "^5.0.0",
