@@ -31,11 +31,17 @@ export function createProjectsRouter(): Router {
       const { status = 'active', limit = '50' } = req.query as { status?: string; limit?: string };
 
       const statusFilter = status === 'all' ? 'all' : (status as 'active' | 'archived');
+
+      // Debug: Clear cache to ensure fresh data
+      registry.clearCache();
+
       const projects = registry.listProjects({
         status: statusFilter,
         limit: parseInt(limit, 10),
         sortBy: 'lastAccessed',
       });
+
+      console.log(`[API] /projects: Found ${projects.length} projects (status=${statusFilter})`);
 
       res.json({
         success: true,

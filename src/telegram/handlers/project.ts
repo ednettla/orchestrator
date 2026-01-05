@@ -9,7 +9,9 @@
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
+import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { projectSelectionKeyboard } from '../keyboards.js';
+import { createProject } from '../project-bridge.js';
 
 /**
  * Handle /projects command
@@ -165,19 +167,43 @@ export async function newProjectHandler(ctx: CommandContext): Promise<CommandRes
     };
   }
 
-  // Note: Actual project creation would need to run on the server
-  // For now, we'll provide instructions
+  // Get the first allowed path as the base directory
+  const pathsManager = getAllowedPathsManager();
+  const allowedPaths = pathsManager.listPaths();
+  const firstAllowedPath = allowedPaths[0];
+
+  if (!firstAllowedPath) {
+    return {
+      success: false,
+      response:
+        '⚠️ No allowed paths configured.\n\n' +
+        'An admin needs to add an allowed path first:\n' +
+        '`/paths add /path/to/projects`',
+      parseMode: 'Markdown',
+    };
+  }
+
+  // Use the first allowed path as the base
+  const basePath = firstAllowedPath.path;
+
+  // Create the project
+  const result = await createProject(basePath, projectName);
+
+  if (!result.success) {
+    return {
+      success: false,
+      response: `❌ Failed to create project:\n${result.error}`,
+    };
+  }
+
   return {
     success: true,
     response:
-      `🚧 *Project Creation*\n\n` +
-      `To create project \`${projectName}\`, run on your server:\n\n` +
-      '```\n' +
-      `mkdir ${projectName}\n` +
-      `cd ${projectName}\n` +
-      `orchestrate init\n` +
-      '```\n\n' +
-      'The project will then appear in `/projects`.',
+      `✅ *Project Created*\n\n` +
+      `Name: ${projectName}\n` +
+      `Path: \`${result.projectPath}\`\n\n` +
+      `Use \`/${projectName} status\` to check project status.\n` +
+      `Use \`/${projectName} add \"requirement\"\` to add requirements.`,
     parseMode: 'Markdown',
   };
 }

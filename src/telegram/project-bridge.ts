@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { ProjectStatus, ProjectPhase, RequirementsSummary } from './types.js';
 
@@ -913,4 +913,60 @@ export async function refreshClaudeMd(
     }
   }
   return executeCommand(projectPath, 'refresh', args);
+}
+
+// ============================================================================
+// Project Creation
+// ============================================================================
+
+interface CreateProjectResult extends CommandResult {
+  projectPath?: string;
+}
+
+/**
+ * Create a new project from Telegram
+ * Creates directory and initializes orchestrator
+ */
+export async function createProject(
+  basePath: string,
+  projectName: string
+): Promise<CreateProjectResult> {
+  const projectPath = path.join(basePath, projectName);
+
+  // Check if directory already exists
+  if (existsSync(projectPath)) {
+    return {
+      success: false,
+      output: '',
+      error: `Directory already exists: ${projectPath}`,
+    };
+  }
+
+  // Create directory
+  try {
+    mkdirSync(projectPath, { recursive: true });
+  } catch (err) {
+    return {
+      success: false,
+      output: '',
+      error: `Failed to create directory: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    };
+  }
+
+  // Initialize project
+  const initResult = await executeCommand(projectPath, 'init', ['--name', projectName]);
+
+  if (!initResult.success) {
+    return {
+      success: false,
+      output: initResult.output,
+      error: initResult.error ?? 'Initialization failed',
+    };
+  }
+
+  return {
+    success: true,
+    output: initResult.output,
+    projectPath,
+  };
 }
