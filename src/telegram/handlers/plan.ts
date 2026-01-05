@@ -13,7 +13,6 @@ import {
   rejectPlanFromApi,
   answerPlanQuestionFromApi,
 } from '../project-bridge.js';
-import { startPlanWizard } from '../flows/plan-wizard.js';
 import { createStore } from '../../state/store.js';
 import type { ClarifyingQuestion } from '../../core/types.js';
 import {
@@ -28,7 +27,7 @@ import {
 /**
  * Handle plan command
  *
- * Uses the interactive plan wizard for goal input and Q&A flow.
+ * Uses the unified flow system for plan creation.
  */
 export async function planHandler(ctx: CommandContext): Promise<CommandResult> {
   const { projectName, quotedArg, args } = ctx;
@@ -54,10 +53,18 @@ export async function planHandler(ctx: CommandContext): Promise<CommandResult> {
   // Get goal from quoted arg or remaining args
   const goal = quotedArg ?? args.join(' ');
 
-  // Start the plan wizard (with optional goal)
-  await startPlanWizard(ctx.ctx, project.name, goal || undefined);
+  // Use the unified flow system for plan creation
+  const { startMainMenuFlow } = await import('../../interactions/telegram-session.js');
+  const { getGlobalStore } = await import('../../core/global-store.js');
 
-  // Return empty response since wizard handles all messages
+  const globalStore = getGlobalStore();
+  const user = globalStore.getUser(ctx.user.telegramId);
+  const role = user?.role ?? 'viewer';
+
+  // Start the main menu flow which will show plan options
+  await startMainMenuFlow(ctx.ctx, project.path, role);
+
+  // Return empty response since flow handles all messages
   return {
     success: true,
     response: '',

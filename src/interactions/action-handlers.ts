@@ -11,6 +11,8 @@ import type { FlowContext } from './types.js';
 import type { DaemonFlowContext } from './flows/daemon.js';
 import type { RunFlowContext } from './flows/run.js';
 import type { RequirementsFlowContext } from './flows/requirements.js';
+import type { PlanFlowContext } from './flows/plan.js';
+import type { ConfigFlowContext } from './flows/config.js';
 
 // ============================================================================
 // Action Handler Types
@@ -312,10 +314,284 @@ export const listRequirementsAction: ActionHandler<RequirementsFlowContext> = as
 };
 
 // ============================================================================
+// Plan Actions
+// ============================================================================
+
+/**
+ * Create a new plan from goal
+ */
+export const createPlanAction: ActionHandler<PlanFlowContext> = async (ctx, platform) => {
+  try {
+    const { startPlanFromApi } = await import('../telegram/project-bridge.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project selected';
+      return { nextStep: 'error' };
+    }
+
+    const goal = ctx.planGoal;
+    if (!goal) {
+      ctx.error = 'No goal provided';
+      return { nextStep: 'error' };
+    }
+
+    const result = await startPlanFromApi(ctx.projectPath, goal);
+
+    if (!result.success) {
+      ctx.error = result.error ?? 'Failed to create plan';
+      return { nextStep: 'error' };
+    }
+
+    // Plan created - refresh context and show questions or plan
+    // The plan data should be reloaded by the caller
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to create plan';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Resume an existing plan
+ */
+export const resumePlanAction: ActionHandler<PlanFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    // For Telegram, just return to menu - the plan state is already loaded
+    return { nextStep: 'menu' };
+  }
+
+  // CLI: Run the plan command with --resume
+  try {
+    const { planCommand } = await import('../cli/commands/plan.js');
+
+    if (!ctx.projectPath) {
+      return { nextStep: 'menu', error: 'No project path' };
+    }
+
+    await planCommand(undefined, { path: ctx.projectPath, resume: true });
+    return { nextStep: 'menu' };
+  } catch (error) {
+    return { nextStep: 'menu', error: error instanceof Error ? error.message : 'Resume failed' };
+  }
+};
+
+/**
+ * Approve the plan
+ */
+export const approvePlanAction: ActionHandler<PlanFlowContext> = async (ctx) => {
+  try {
+    const { approvePlanFromApi } = await import('../telegram/project-bridge.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project selected';
+      return { nextStep: 'error' };
+    }
+
+    const result = await approvePlanFromApi(ctx.projectPath);
+
+    if (!result.success) {
+      ctx.error = result.error ?? 'Failed to approve plan';
+      return { nextStep: 'error' };
+    }
+
+    // Plan approved - return to menu with success
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to approve plan';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Execute the plan (run requirements)
+ */
+export const executePlanAction: ActionHandler<PlanFlowContext> = async (ctx) => {
+  try {
+    const { spawnDaemon } = await import('../cli/daemon.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project selected';
+      return { nextStep: 'error' };
+    }
+
+    // Start daemon to execute requirements
+    const result = spawnDaemon(ctx.projectPath, 'run', ['-c', '3']);
+
+    if (!result.success) {
+      ctx.error = result.error ?? 'Failed to start execution';
+      return { nextStep: 'error' };
+    }
+
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to execute plan';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Reject the plan
+ */
+export const rejectPlanAction: ActionHandler<PlanFlowContext> = async (ctx) => {
+  try {
+    const { rejectPlanFromApi } = await import('../telegram/project-bridge.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project selected';
+      return { nextStep: 'error' };
+    }
+
+    const result = await rejectPlanFromApi(ctx.projectPath, 'Rejected via menu');
+
+    if (!result.success) {
+      ctx.error = result.error ?? 'Failed to reject plan';
+      return { nextStep: 'error' };
+    }
+
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to reject plan';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
+// Config Actions
+// ============================================================================
+
+/**
+ * Show project settings (CLI only)
+ */
+export const projectSettingsAction: ActionHandler<ConfigFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    // Telegram doesn't support interactive config editing
+    return { nextStep: 'menu', error: 'Use CLI for project settings' };
+  }
+
+  try {
+    const { configInteractive } = await import('../cli/commands/config.js');
+
+    if (!ctx.projectPath) {
+      return { nextStep: 'menu', error: 'No project path' };
+    }
+
+    await configInteractive({ path: ctx.projectPath });
+    return { nextStep: 'menu' };
+  } catch (error) {
+    return { nextStep: 'menu', error: error instanceof Error ? error.message : 'Config failed' };
+  }
+};
+
+/**
+ * List MCP servers
+ */
+export const listMcpAction: ActionHandler<ConfigFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'menu', error: 'Use CLI for MCP management' };
+  }
+
+  try {
+    const { mcpListCommand } = await import('../cli/commands/mcp.js');
+
+    if (!ctx.projectPath) {
+      return { nextStep: 'menu', error: 'No project path' };
+    }
+
+    await mcpListCommand({ path: ctx.projectPath, global: false });
+
+    const { input } = await import('@inquirer/prompts');
+    await input({ message: 'Press Enter to continue...' });
+
+    return { nextStep: 'menu' };
+  } catch (error) {
+    return { nextStep: 'menu', error: error instanceof Error ? error.message : 'List failed' };
+  }
+};
+
+/**
+ * Add MCP server - directly uses mcpConfigManager
+ */
+export const addMcpAction: ActionHandler<ConfigFlowContext> = async (ctx) => {
+  try {
+    const { mcpConfigManager } = await import('../core/mcp-config-manager.js');
+    const path = await import('node:path');
+
+    // Get MCP config from context
+    const name = ctx.mcpServerName;
+    const transport = ctx.mcpTransport;
+    const command = ctx.mcpCommand;
+    const args = ctx.mcpArgs;
+    const url = ctx.mcpUrl;
+
+    if (!name || !transport || !ctx.projectPath) {
+      return { nextStep: 'menu', error: 'Missing server configuration' };
+    }
+
+    const projectPath = path.resolve(ctx.projectPath);
+
+    // Build server config based on transport type
+    const serverConfig: {
+      type: 'stdio' | 'http' | 'sse';
+      command?: string;
+      args?: string[];
+      url?: string;
+      enabled?: boolean;
+    } = {
+      type: transport,
+      enabled: true,
+    };
+
+    if (transport === 'stdio') {
+      serverConfig.command = command ?? 'npx';
+      serverConfig.args = args?.split(' ').filter(Boolean) ?? [];
+    } else if (url) {
+      serverConfig.url = url;
+    }
+
+    await mcpConfigManager.addServer(name, serverConfig, projectPath);
+
+    // Clear wizard state
+    delete ctx.mcpServerName;
+    delete ctx.mcpTransport;
+    delete ctx.mcpCommand;
+    delete ctx.mcpArgs;
+    delete ctx.mcpUrl;
+
+    return { nextStep: 'menu' };
+  } catch (error) {
+    return { nextStep: 'menu', error: error instanceof Error ? error.message : 'Add failed' };
+  }
+};
+
+/**
+ * Toggle MCP server - CLI only, uses enable/disable commands
+ */
+export const toggleMcpAction: ActionHandler<ConfigFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'menu', error: 'Use CLI for MCP management' };
+  }
+
+  // For now, just return to menu - toggle needs interactive selection
+  return { nextStep: 'menu', error: 'Use "orchestrate mcp enable/disable <name>" command' };
+};
+
+/**
+ * Remove MCP server - CLI only
+ */
+export const removeMcpAction: ActionHandler<ConfigFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'menu', error: 'Use CLI for MCP management' };
+  }
+
+  // For now, just return to menu - remove needs interactive selection
+  return { nextStep: 'menu', error: 'Use "orchestrate mcp remove <name>" command' };
+};
+
+// ============================================================================
 // Action Registry
 // ============================================================================
 
-type AnyContext = DaemonFlowContext | RunFlowContext | RequirementsFlowContext;
+type AnyContext = DaemonFlowContext | RunFlowContext | RequirementsFlowContext | PlanFlowContext | ConfigFlowContext;
 
 const actionRegistry: Record<string, ActionHandler<AnyContext>> = {
   // Daemon actions
@@ -332,6 +608,20 @@ const actionRegistry: Record<string, ActionHandler<AnyContext>> = {
   // Requirements actions
   add_requirement: addRequirementAction as ActionHandler<AnyContext>,
   list_requirements: listRequirementsAction as ActionHandler<AnyContext>,
+
+  // Plan actions
+  create_plan: createPlanAction as ActionHandler<AnyContext>,
+  resume_plan: resumePlanAction as ActionHandler<AnyContext>,
+  approve_plan: approvePlanAction as ActionHandler<AnyContext>,
+  execute_plan: executePlanAction as ActionHandler<AnyContext>,
+  reject_plan: rejectPlanAction as ActionHandler<AnyContext>,
+
+  // Config actions
+  project_settings: projectSettingsAction as ActionHandler<AnyContext>,
+  list_mcp: listMcpAction as ActionHandler<AnyContext>,
+  add_mcp: addMcpAction as ActionHandler<AnyContext>,
+  toggle_mcp: toggleMcpAction as ActionHandler<AnyContext>,
+  remove_mcp: removeMcpAction as ActionHandler<AnyContext>,
 };
 
 /**

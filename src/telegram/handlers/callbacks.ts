@@ -10,12 +10,6 @@ import type { Bot, Context } from 'grammy';
 import { parseCallbackData, type CallbackData } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
-import { handleWizardCallback } from '../flows/project-wizard.js';
-import { handlePlanWizardCallback } from '../flows/plan-wizard.js';
-import {
-  handleRequirementWizardCallback,
-  startRequirementWizard,
-} from '../flows/requirement-wizard.js';
 import { safeEditMessage } from '../utils/safe-edit.js';
 import { sendTyping } from '../utils/typing.js';
 import {
@@ -57,23 +51,8 @@ export function registerCallbackHandlers(bot: Bot): void {
 async function handleCallback(ctx: Context): Promise<void> {
   const rawData = ctx.callbackQuery?.data ?? '';
 
-  // Handle wizard callbacks first (wizard:category:action:...)
-  if (rawData.startsWith('wizard:')) {
-    await handleWizardCallback(ctx, rawData);
-    return;
-  }
-
-  // Handle plan wizard callbacks (planwiz:action:projectName:...)
-  if (rawData.startsWith('planwiz:')) {
-    await handlePlanWizardCallback(ctx, rawData);
-    return;
-  }
-
-  // Handle requirement wizard callbacks (reqwiz:action:projectName)
-  if (rawData.startsWith('reqwiz:')) {
-    await handleRequirementWizardCallback(ctx, rawData);
-    return;
-  }
+  // Note: Old wizard callbacks (wizard:, planwiz:, reqwiz:) are deprecated
+  // The unified flow system handles all interactions now via handleFlowCallback in bot.ts
 
   const data = parseCallbackData(rawData);
   const store = getGlobalStore();
@@ -805,8 +784,24 @@ async function handleAddReq(ctx: Context, data: CallbackData): Promise<void> {
     return;
   }
 
+  // Use unified flow system for adding requirements
+  const { startMainMenuFlow } = await import('../../interactions/telegram-session.js');
+  const registry = getProjectRegistry();
+  const project = registry.getProject(projectName);
+
+  if (!project) {
+    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    return;
+  }
+
+  const globalStore = getGlobalStore();
+  const user = globalStore.getUser(ctx.from?.id ?? 0);
+  const role = user?.role ?? 'viewer';
+
   await ctx.answerCallbackQuery();
-  await startRequirementWizard(ctx, projectName);
+
+  // Navigate to requirements flow
+  await startMainMenuFlow(ctx, project.path, role);
 }
 
 // ============================================================================

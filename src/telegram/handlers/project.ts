@@ -10,7 +10,6 @@ import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
 import { projectSelectionKeyboard } from '../keyboards.js';
-import { startProjectWizard } from '../flows/project-wizard.js';
 
 /**
  * Handle /projects command
@@ -126,21 +125,42 @@ export async function switchHandler(ctx: CommandContext): Promise<CommandResult>
 /**
  * Handle /new command
  *
- * Starts an interactive wizard for project creation.
+ * Uses the unified flow system for project creation.
  */
 export async function newProjectHandler(ctx: CommandContext): Promise<CommandResult> {
-  const { args, quotedArg } = ctx;
+  const { args, quotedArg, user } = ctx;
 
   const rawName = quotedArg ?? args.join(' ');
   const projectName = rawName || undefined;
 
-  // Start the wizard (it handles validation internally)
-  await startProjectWizard(ctx.ctx, projectName);
+  if (!projectName) {
+    return {
+      success: false,
+      response:
+        `📁 *Create a New Project*\n\n` +
+        `Usage: \`/new <project-name>\`\n\n` +
+        `Example:\n` +
+        `\`/new my-awesome-app\``,
+      parseMode: 'Markdown',
+    };
+  }
 
-  // Return empty result since wizard handles all responses
+  // Use the unified flow system
+  const { startMainMenuFlow } = await import('../../interactions/telegram-session.js');
+  const role = user.role ?? 'viewer';
+
+  // For now, show instructions - init flow is complex and needs CLI
   return {
     success: true,
-    response: '', // Wizard sends its own messages
-    skipReply: true,
+    response:
+      `📁 *Create Project: ${projectName}*\n\n` +
+      `To create and initialize a project:\n\n` +
+      `1. Create the directory:\n` +
+      `\`mkdir /path/to/${projectName}\`\n\n` +
+      `2. Initialize it:\n` +
+      `\`/init /path/to/${projectName}\`\n\n` +
+      `Or use the CLI:\n` +
+      `\`orchestrate new ${projectName}\``,
+    parseMode: 'Markdown',
   };
 }

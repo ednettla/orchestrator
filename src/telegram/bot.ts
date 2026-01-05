@@ -12,9 +12,6 @@ import { getGlobalStore } from '../core/global-store.js';
 import { createWebAppServer, type WebAppServer } from './webapp/server.js';
 import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers } from './handlers/index.js';
 import { routeCommand } from './router.js';
-import { handleWizardTextInput } from './flows/project-wizard.js';
-import { handlePlanWizardTextInput } from './flows/plan-wizard.js';
-import { handleRequirementWizardTextInput } from './flows/requirement-wizard.js';
 
 // Unified Interactions System
 import {
@@ -93,23 +90,10 @@ export async function startBot(): Promise<void> {
     const text = ctx.message?.text;
     if (!text) return;
 
-    // Check if wizard is waiting for text input
+    // Check if unified flow system is waiting for text input
     if (!text.startsWith('/')) {
-      // Check unified flow system first
       const handledByFlow = await handleFlowTextInput(ctx, text);
       if (handledByFlow) return;
-
-      // Check project wizard first
-      const handledByProjectWizard = await handleWizardTextInput(ctx, text);
-      if (handledByProjectWizard) return;
-
-      // Check requirement wizard
-      const handledByRequirementWizard = await handleRequirementWizardTextInput(ctx, text);
-      if (handledByRequirementWizard) return;
-
-      // Check plan wizard
-      const handledByPlanWizard = await handlePlanWizardTextInput(ctx, text);
-      if (handledByPlanWizard) return;
     }
 
     const result = await routeCommand(ctx, user);
