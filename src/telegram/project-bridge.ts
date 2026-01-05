@@ -691,19 +691,44 @@ export async function runRequirementFromApi(
 
 /**
  * Start planning process (for WebApp API)
+ *
+ * Creates a plan and starts question generation in the background.
+ * The caller should poll for questions via getPlanStatus.
  */
 export async function startPlanFromApi(projectPath: string, goal: string): Promise<ApiResult> {
   try {
-    // Pass goal as the first argument, then --background flag
-    const result = await executeCommand(projectPath, 'plan', [goal, '--background']);
+    // Import SessionManager and PlanController dynamically
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { PlanController } = await import('../planning/plan-controller.js');
 
-    if (!result.success) {
-      return { success: false, error: result.error ?? result.output };
+    // Initialize and resume session
+    await sessionManager.initialize(projectPath);
+    await sessionManager.resumeSession(projectPath);
+
+    const controller = new PlanController(sessionManager);
+
+    // Check for existing active plan
+    const existingPlan = controller.getActivePlan();
+    if (existingPlan) {
+      // Return existing plan - let the caller decide what to do
+      return {
+        success: true,
+        jobId: existingPlan.id,
+      };
     }
+
+    // Create new plan
+    const plan = await controller.createPlan(goal);
+
+    // Start generating questions in the background (fire and forget)
+    // This runs async without blocking the response
+    controller.generateQuestions(plan.id).catch((error) => {
+      console.error('[PlanWizard] Question generation failed:', error);
+    });
 
     return {
       success: true,
-      jobId: `plan-${Date.now()}`,
+      jobId: plan.id,
     };
   } catch (error) {
     return {
