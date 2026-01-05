@@ -202,11 +202,43 @@ export const showStatusAction: ActionHandler<RunFlowContext> = async (ctx, platf
 
 /**
  * View logs from run flow
+ * Note: Unlike daemon flow, this displays logs inline and returns to menu
+ * since run flow doesn't have display_logs/logs_actions steps
  */
 export const viewLogsAction: ActionHandler<RunFlowContext> = async (ctx, platform) => {
-  // Reuse daemon action
-  const daemonCtx = ctx as unknown as DaemonFlowContext;
-  return loadLogsAction(daemonCtx, platform);
+  if (platform === 'telegram') {
+    // Telegram handles this via callback handlers
+    return { nextStep: 'menu' };
+  }
+
+  // CLI: Display logs inline and return to menu
+  try {
+    const { getRecentLogs } = await import('../telegram/project-bridge.js');
+
+    if (!ctx.projectPath) {
+      return { nextStep: 'menu', error: 'No project path' };
+    }
+
+    const logs = await getRecentLogs(ctx.projectPath, 30);
+
+    console.log('\n' + '='.repeat(60));
+    console.log('Recent Logs:');
+    console.log('='.repeat(60));
+    if (logs.length > 0) {
+      console.log(logs.join('\n'));
+    } else {
+      console.log('No logs available');
+    }
+    console.log('='.repeat(60) + '\n');
+
+    // Wait for user to acknowledge
+    const { input } = await import('@inquirer/prompts');
+    await input({ message: 'Press Enter to continue...' });
+
+    return { nextStep: 'menu' };
+  } catch (error) {
+    return { nextStep: 'menu', error: error instanceof Error ? error.message : 'Failed to load logs' };
+  }
 };
 
 // ============================================================================

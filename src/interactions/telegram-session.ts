@@ -129,10 +129,12 @@ class TelegramFlowSessionManager {
       return true;
     }
 
-    // Check for sub-flow navigation
-    const flowContext = session.runner.getContext() as MainMenuContext;
-    if (flowContext.selectedAction?.startsWith('flow:')) {
-      const subFlowId = getSubFlowId(flowContext.selectedAction);
+    // Check for sub-flow navigation - step handler returns 'flow:xyz'
+    // which FlowRunner sets as currentStepId
+    const currentStepId = session.runner.getCurrentStepId();
+    if (currentStepId.startsWith('flow:')) {
+      const subFlowId = getSubFlowId(currentStepId);
+      const flowContext = session.runner.getContext() as MainMenuContext;
 
       // End the current flow session - sub-flow takes over
       this.sessions.delete(telegramId);

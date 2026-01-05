@@ -86,18 +86,16 @@ async function main(): Promise<void> {
     // Handle response
     const result = await runner.handleResponse(response);
 
-    // Check for sub-flow navigation
-    if (!result.done && result.error === undefined) {
-      const currentStep = runner.getCurrentStepId();
-      // Check if the handler returned a flow: navigation
-      const ctx = runner.getContext();
-      if (ctx.selectedAction?.startsWith('flow:')) {
-        const subFlowId = getSubFlowId(ctx.selectedAction);
-        console.log(`\n[Would navigate to sub-flow: ${subFlowId}]\n`);
-        // For now, just show a message and go back to menu
-        // In production, we'd load and run the sub-flow
-        continue;
-      }
+    // Check for sub-flow navigation - step handler returns 'flow:xyz'
+    // which FlowRunner sets as currentStepId
+    const currentStepId = runner.getCurrentStepId();
+    if (currentStepId.startsWith('flow:')) {
+      const subFlowId = getSubFlowId(currentStepId);
+      console.log(`\n[Would navigate to sub-flow: ${subFlowId}]\n`);
+      // For now, just show a message and go back to menu
+      // In production, we'd load and run the sub-flow
+      runner.navigateTo('menu');
+      continue;
     }
 
     if (result.done) {
