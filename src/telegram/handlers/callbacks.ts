@@ -186,6 +186,26 @@ async function handleCallback(ctx: Context): Promise<void> {
         await handleCancel(ctx);
         break;
 
+      // Menu navigation (from unified flow system)
+      case 'menu':
+        await handleMenuBack(ctx);
+        break;
+      case 'add':
+        await handleAddReq(ctx, data);
+        break;
+      case 'run_start':
+        await handleStartRun(ctx, data);
+        break;
+      case 'logs_follow':
+        await handleLogsFollow(ctx, data);
+        break;
+      case 'switch_project':
+        await handleSwitchProject(ctx);
+        break;
+      case 'noop':
+        await ctx.answerCallbackQuery();
+        break;
+
       default:
         await ctx.answerCallbackQuery({ text: `Unknown action: ${data.action}` });
     }
@@ -941,6 +961,70 @@ async function handleConfigCloud(ctx: Context, data: CallbackData): Promise<void
 
 async function handleCancel(ctx: Context): Promise<void> {
   await safeEditMessage(ctx,'_Cancelled._', { parse_mode: 'Markdown' });
+  await ctx.answerCallbackQuery();
+}
+
+async function handleMenuBack(ctx: Context): Promise<void> {
+  // Re-start the main menu flow
+  const { startMainMenuFlow } = await import('../../interactions/telegram-session.js');
+  const registry = getProjectRegistry();
+  const globalStore = getGlobalStore();
+  const projects = registry.listProjects();
+  const projectPath = projects[0]?.path ?? process.cwd();
+  const user = globalStore.getUser(ctx.from?.id ?? 0);
+  const role = user?.role ?? 'viewer';
+
+  await ctx.answerCallbackQuery();
+  await startMainMenuFlow(ctx, projectPath, role);
+}
+
+async function handleLogsFollow(ctx: Context, data: CallbackData): Promise<void> {
+  const registry = getProjectRegistry();
+  const project = registry.getProject(data.projectName ?? '');
+
+  if (!project) {
+    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    return;
+  }
+
+  // For live logs, we can't truly stream in Telegram, so show recent logs with refresh button
+  const logs = await getRecentLogs(project.path, 30);
+  const formattedLogs = logs.slice(-15).map((line) => `\`${truncate(line, 60)}\``).join('\n');
+
+  const { InlineKeyboard } = await import('grammy');
+  const keyboard = new InlineKeyboard()
+    .text('🔄 Refresh', `logs_refresh:${project.name}`)
+    .row()
+    .text('◀️ Back to Menu', 'menu:back');
+
+  await safeEditMessage(ctx,
+    `📺 *Live Logs* (refresh to update)\n\n${formattedLogs || '_No logs yet_'}`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+  await ctx.answerCallbackQuery();
+}
+
+async function handleSwitchProject(ctx: Context): Promise<void> {
+  const registry = getProjectRegistry();
+  const projects = registry.listProjects();
+
+  if (projects.length === 0) {
+    await ctx.answerCallbackQuery({ text: 'No projects available' });
+    return;
+  }
+
+  const { InlineKeyboard } = await import('grammy');
+  const keyboard = new InlineKeyboard();
+
+  for (const project of projects.slice(0, 10)) {
+    keyboard.text(`📁 ${project.name}`, `select:${project.name}`).row();
+  }
+  keyboard.text('◀️ Back to Menu', 'menu:back');
+
+  await safeEditMessage(ctx,
+    `🔄 *Switch Project*\n\nSelect a project:`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
   await ctx.answerCallbackQuery();
 }
 

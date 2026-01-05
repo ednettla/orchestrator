@@ -20,6 +20,16 @@ import { mainMenuFlow, getSubFlowId } from './flows/main-menu.js';
 import type { Flow, FlowContext, FlowSession } from './types.js';
 import type { MainMenuContext } from './flows/main-menu.js';
 
+// Import Telegram handlers and wizards for sub-flow delegation
+import { startPlanWizard } from '../telegram/flows/plan-wizard.js';
+import { startRequirementWizard } from '../telegram/flows/requirement-wizard.js';
+import { getProjectRegistry } from '../core/project-registry.js';
+import { InlineKeyboard } from 'grammy';
+import {
+  getDaemonStatus,
+  getProjectStatus,
+} from '../telegram/project-bridge.js';
+
 /**
  * Active session with its runner
  */
@@ -123,9 +133,12 @@ class TelegramFlowSessionManager {
     const flowContext = session.runner.getContext() as MainMenuContext;
     if (flowContext.selectedAction?.startsWith('flow:')) {
       const subFlowId = getSubFlowId(flowContext.selectedAction);
-      // TODO: Load and run sub-flow
-      // For now, just acknowledge
-      await ctx.answerCallbackQuery({ text: `Opening ${subFlowId}...` });
+
+      // End the current flow session - sub-flow takes over
+      this.sessions.delete(telegramId);
+
+      // Delegate to appropriate Telegram handler/wizard
+      await this.delegateToSubFlow(ctx, subFlowId, flowContext);
       return true;
     }
 
@@ -212,6 +225,254 @@ class TelegramFlowSessionManager {
 
     const interaction = step.interaction(session.runner.getContext());
     session.waitingForText = interaction?.type === 'input';
+  }
+
+  /**
+   * Delegate to a sub-flow by invoking the appropriate Telegram handler/wizard
+   */
+  private async delegateToSubFlow(
+    ctx: Context,
+    subFlowId: string | null,
+    flowContext: MainMenuContext
+  ): Promise<void> {
+    if (!subFlowId) {
+      await ctx.answerCallbackQuery({ text: 'Unknown flow' });
+      return;
+    }
+
+    // Get project info from context
+    const projectPath = flowContext.projectPath;
+    const projectName = flowContext.projectName;
+
+    // Answer the callback query first
+    await ctx.answerCallbackQuery();
+
+    switch (subFlowId) {
+      case 'init': {
+        // Show project initialization guidance
+        const keyboard = new InlineKeyboard()
+          .text('📂 Use /init <path>', 'noop')
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          '🚀 *Initialize a Project*\n\n' +
+            'Use the `/init` command with a path:\n' +
+            '`/init /path/to/project`\n\n' +
+            'Or use `/new <name>` to create a new project.',
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'plan': {
+        if (!projectName) {
+          await ctx.reply('❌ No project selected. Use /projects to select one.');
+          return;
+        }
+        // Start the plan wizard
+        await startPlanWizard(ctx, projectName);
+        break;
+      }
+
+      case 'run': {
+        if (!projectPath || !projectName) {
+          await ctx.reply('❌ No project selected. Use /projects to select one.');
+          return;
+        }
+
+        // Check daemon status and show run options
+        const daemonStatus = await getDaemonStatus(projectPath);
+        const status = await getProjectStatus(projectPath);
+
+        if (daemonStatus.running) {
+          const keyboard = new InlineKeyboard()
+            .text('📋 View Logs', `logs:${projectName}`)
+            .text('⏹ Stop', `stop:${projectName}`)
+            .row()
+            .text('◀️ Back to Menu', 'menu:back');
+
+          await ctx.reply(
+            `⚙️ *Daemon Running*\n\n` +
+              `Project: ${projectName}\n` +
+              `PID: ${daemonStatus.pid}`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+          );
+        } else if (status.requirements.pending === 0 && status.requirements.inProgress === 0) {
+          const keyboard = new InlineKeyboard()
+            .text('➕ Add Requirement', `add:${projectName}`)
+            .row()
+            .text('◀️ Back to Menu', 'menu:back');
+
+          await ctx.reply(
+            `⚠️ *No Pending Requirements*\n\n` +
+              `Add requirements first to run.`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+          );
+        } else {
+          const keyboard = new InlineKeyboard()
+            .text('▶️ Start Run', `run_start:${projectName}`)
+            .row()
+            .text('◀️ Back to Menu', 'menu:back');
+
+          await ctx.reply(
+            `▶️ *Run Requirements*\n\n` +
+              `Project: ${projectName}\n` +
+              `Pending: ${status.requirements.pending}\n` +
+              `In Progress: ${status.requirements.inProgress}`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+          );
+        }
+        break;
+      }
+
+      case 'requirements': {
+        if (!projectName) {
+          await ctx.reply('❌ No project selected. Use /projects to select one.');
+          return;
+        }
+
+        // Show requirements management options
+        const keyboard = new InlineKeyboard()
+          .text('📋 List All', `reqs:${projectName}`)
+          .text('➕ Add New', `add:${projectName}`)
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `📝 *Manage Requirements*\n\n` +
+            `Project: ${projectName}\n\n` +
+            `Choose an action:`,
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'daemon': {
+        if (!projectPath || !projectName) {
+          await ctx.reply('❌ No project selected. Use /projects to select one.');
+          return;
+        }
+
+        // Show daemon controls
+        const daemonStatus = await getDaemonStatus(projectPath);
+
+        if (!daemonStatus.running) {
+          await ctx.reply(
+            `⚪ *No Daemon Running*\n\n` +
+              `Use /run to start execution.`,
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+
+        const keyboard = new InlineKeyboard()
+          .text('📋 Recent Logs', `logs:${projectName}`)
+          .text('📺 Follow Logs', `logs_follow:${projectName}`)
+          .row()
+          .text('⏹ Stop Daemon', `stop:${projectName}`)
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `⚙️ *Daemon Controls*\n\n` +
+            `Project: ${projectName}\n` +
+            `PID: ${daemonStatus.pid}`,
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'config': {
+        // Show config options
+        const keyboard = new InlineKeyboard()
+          .text('🔧 Project Config', `config:${projectName ?? 'none'}`)
+          .row()
+          .text('🔌 MCP Servers', `mcp:${projectName ?? 'none'}`)
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `🔧 *Configuration*\n\n` +
+            `Choose what to configure:`,
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'secrets': {
+        // Show secrets management
+        const keyboard = new InlineKeyboard()
+          .text('📋 View Secrets', `secrets:${projectName ?? 'none'}`)
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `🔐 *Secrets Management*\n\n` +
+            `Manage environment-specific secrets.\n\n` +
+            `Use \`/${projectName ?? '<project>'} secrets [env]\` to view.`,
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'projects': {
+        // Show project registry info
+        const registry = getProjectRegistry();
+        const projects = registry.listProjects();
+
+        if (projects.length === 0) {
+          await ctx.reply(
+            `📁 *No Projects*\n\n` +
+              `Use \`/new <name>\` to create a project.`,
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+
+        const projectList = projects
+          .slice(0, 10)
+          .map((p) => `• ${p.name}${p.alias ? ` (${p.alias})` : ''}`)
+          .join('\n');
+
+        const keyboard = new InlineKeyboard()
+          .text('🔄 Switch Project', 'switch_project')
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `📁 *Projects* (${projects.length})\n\n` +
+            `${projectList}` +
+            (projects.length > 10 ? `\n_...and ${projects.length - 10} more_` : ''),
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      case 'telegram': {
+        // Show telegram bot management
+        const keyboard = new InlineKeyboard()
+          .text('👤 List Users', 'tg_users')
+          .row()
+          .text('◀️ Back to Menu', 'menu:back');
+
+        await ctx.reply(
+          `🤖 *Telegram Bot*\n\n` +
+            `Manage bot users and settings.\n\n` +
+            `Use CLI \`orchestrate telegram\` for full management.`,
+          { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+        break;
+      }
+
+      default: {
+        await ctx.reply(
+          `⚠️ Flow not yet implemented: \`${subFlowId}\`\n\n` +
+            `Use the CLI for this feature.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
   }
 
   /**
