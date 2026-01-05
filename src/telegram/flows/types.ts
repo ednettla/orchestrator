@@ -221,3 +221,50 @@ export function getStepProgress(step: WizardStep): { current: number; total: num
 
   return { current: 1, total: 5 };
 }
+
+// ============================================================================
+// Plan Wizard State
+// ============================================================================
+
+export type PlanWizardStep =
+  | 'goal'
+  | 'generating_questions'
+  | 'questions'
+  | 'answering'
+  | 'generating_plan'
+  | 'review';
+
+export interface PlanWizardState {
+  step: PlanWizardStep;
+  projectPath: string;
+  projectName: string;
+  planId?: string | undefined;
+  goal?: string | undefined;
+  currentQuestionIndex: number;
+  currentQuestionId?: string | undefined;
+  messageId?: number | undefined;
+}
+
+/**
+ * Create initial plan wizard state
+ */
+export function createInitialPlanWizardState(projectName: string, projectPath: string): PlanWizardState {
+  return {
+    step: 'goal',
+    projectPath,
+    projectName,
+    currentQuestionIndex: 0,
+  };
+}
+
+/**
+ * Question category labels for display
+ */
+export const QUESTION_CATEGORY_LABELS: Record<string, string> = {
+  scope: 'Scope',
+  technical: 'Technical',
+  ux: 'UX',
+  integration: 'Integration',
+  priority: 'Priority',
+  constraints: 'Constraints',
+};

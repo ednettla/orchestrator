@@ -11,6 +11,8 @@ import { parseCallbackData, type CallbackData } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
 import { handleWizardCallback } from '../flows/project-wizard.js';
+import { handlePlanWizardCallback } from '../flows/plan-wizard.js';
+import { safeEditMessage } from '../utils/safe-edit.js';
 import {
   getProjectStatus,
   getDaemonStatus,
@@ -34,48 +36,6 @@ import {
 } from '../keyboards.js';
 
 // ============================================================================
-// Safe Message Edit Helper
-// ============================================================================
-
-/**
- * Safely edit a message, handling common Telegram API errors gracefully.
- * Returns true if edit succeeded, false if it failed due to a non-critical error.
- */
-async function safeEditMessage(
-  ctx: Context,
-  text: string,
-  options?: Parameters<Context['editMessageText']>[1]
-): Promise<boolean> {
-  try {
-    await ctx.editMessageText(text, options);
-    return true;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    // Ignore "message is not modified" - content unchanged
-    if (message.includes('message is not modified')) {
-      return true;
-    }
-
-    // Ignore "message to edit not found" - message was deleted
-    if (message.includes('message to edit not found') ||
-        message.includes('MESSAGE_ID_INVALID')) {
-      console.warn('[Callback] Message was deleted, cannot edit');
-      return false;
-    }
-
-    // Ignore "message can\'t be edited" - too old or no permission
-    if (message.includes("message can't be edited")) {
-      console.warn('[Callback] Message cannot be edited');
-      return false;
-    }
-
-    // Re-throw unexpected errors
-    throw error;
-  }
-}
-
-// ============================================================================
 // Registration
 // ============================================================================
 
@@ -96,6 +56,12 @@ async function handleCallback(ctx: Context): Promise<void> {
   // Handle wizard callbacks first (wizard:category:action:...)
   if (rawData.startsWith('wizard:')) {
     await handleWizardCallback(ctx, rawData);
+    return;
+  }
+
+  // Handle plan wizard callbacks (planwiz:action:projectName:...)
+  if (rawData.startsWith('planwiz:')) {
+    await handlePlanWizardCallback(ctx, rawData);
     return;
   }
 

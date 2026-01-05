@@ -15,11 +15,14 @@ import {
   rejectPlanFromApi,
   answerPlanQuestionFromApi,
 } from '../project-bridge.js';
+import { startPlanWizard } from '../flows/plan-wizard.js';
 import { createStore } from '../../state/store.js';
 import type { ClarifyingQuestion } from '../../core/types.js';
 
 /**
  * Handle plan command
+ *
+ * Uses the interactive plan wizard for goal input and Q&A flow.
  */
 export async function planHandler(ctx: CommandContext): Promise<CommandResult> {
   const { projectName, quotedArg, args } = ctx;
@@ -45,41 +48,14 @@ export async function planHandler(ctx: CommandContext): Promise<CommandResult> {
   // Get goal from quoted arg or remaining args
   const goal = quotedArg ?? args.join(' ');
 
-  if (!goal) {
-    return {
-      success: true,
-      response:
-        `🎯 *Start Planning*\n\n` +
-        `Project: ${project.name}\n\n` +
-        `Usage: \`/${project.name} plan "your goal"\`\n\n` +
-        `Example:\n` +
-        `\`/${project.name} plan "Build a user authentication system"\``,
-      parseMode: 'Markdown',
-      keyboard: planConfirmKeyboard(project.name),
-    };
-  }
+  // Start the plan wizard (with optional goal)
+  await startPlanWizard(ctx.ctx, project.name, goal || undefined);
 
-  // Start planning in daemon mode
-  const result = await startPlan(project.path, goal);
-
-  if (!result.success) {
-    return {
-      success: false,
-      response: `❌ Failed to start planning:\n\`\`\`\n${result.error ?? result.output}\n\`\`\``,
-      parseMode: 'Markdown',
-    };
-  }
-
+  // Return empty response since wizard handles all messages
   return {
     success: true,
-    response:
-      `🚀 *Planning Started*\n\n` +
-      `Project: ${project.name}\n` +
-      `Goal: _${goal}_\n\n` +
-      `The planner is now working on your goal.\n` +
-      `You'll receive a notification when the plan is ready for approval.\n\n` +
-      `Use \`/${project.name} status\` to check progress.`,
-    parseMode: 'Markdown',
+    response: '',
+    skipReply: true,
   };
 }
 

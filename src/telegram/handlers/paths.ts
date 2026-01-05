@@ -11,6 +11,7 @@ import { getGlobalStore } from '../../core/global-store.js';
 import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { safeEditMessage } from '../utils/safe-edit.js';
 
 // ============================================================================
 // Handler Registration
@@ -262,7 +263,7 @@ async function handlePathRemove(ctx: Context): Promise<void> {
     .text('Confirm Remove', `paths:confirm-remove:${pathId}`)
     .text('Cancel', 'paths:cancel');
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     `*Remove Path?*\n\n` +
       `\`${pathInfo.path}\`\n` +
       (pathInfo.description ? `${pathInfo.description}\n` : '') +
@@ -302,14 +303,14 @@ async function handlePathConfirmRemove(ctx: Context): Promise<void> {
 
   if (!pathInfo) {
     await ctx.answerCallbackQuery({ text: 'Path already removed' });
-    await ctx.editMessageText('_Path already removed._', { parse_mode: 'Markdown' });
+    await safeEditMessage(ctx, '_Path already removed._', { parse_mode: 'Markdown' });
     return;
   }
 
   try {
     pathsManager.removePath(pathId);
 
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       `*Path Removed*\n\n` +
         `\`${pathInfo.path}\`\n\n` +
         `_Use /paths to see remaining paths._`,
@@ -327,6 +328,6 @@ async function handlePathConfirmRemove(ctx: Context): Promise<void> {
  * Handle cancel action
  */
 async function handlePathsCancel(ctx: Context): Promise<void> {
-  await ctx.editMessageText('_Operation cancelled._', { parse_mode: 'Markdown' });
+  await safeEditMessage(ctx, '_Operation cancelled._', { parse_mode: 'Markdown' });
   await ctx.answerCallbackQuery();
 }

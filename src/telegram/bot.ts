@@ -13,6 +13,7 @@ import { createWebAppServer, type WebAppServer } from './webapp/server.js';
 import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers, getHelpText } from './handlers/index.js';
 import { routeCommand } from './router.js';
 import { handleWizardTextInput } from './flows/project-wizard.js';
+import { handlePlanWizardTextInput } from './flows/plan-wizard.js';
 
 let bot: Bot | null = null;
 let webappServer: WebAppServer | null = null;
@@ -75,8 +76,13 @@ export async function startBot(): Promise<void> {
 
     // Check if wizard is waiting for text input
     if (!text.startsWith('/')) {
-      const handled = await handleWizardTextInput(ctx, text);
-      if (handled) return;
+      // Check project wizard first
+      const handledByProjectWizard = await handleWizardTextInput(ctx, text);
+      if (handledByProjectWizard) return;
+
+      // Check plan wizard
+      const handledByPlanWizard = await handlePlanWizardTextInput(ctx, text);
+      if (handledByPlanWizard) return;
     }
 
     const result = await routeCommand(ctx, user);

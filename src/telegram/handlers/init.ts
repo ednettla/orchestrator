@@ -12,6 +12,7 @@ import { getGlobalStore } from '../../core/global-store.js';
 import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { initProjectFromApi } from '../project-bridge.js';
+import { safeEditMessage } from '../utils/safe-edit.js';
 
 // ============================================================================
 // Handler Registration
@@ -145,7 +146,7 @@ async function handlePathSelection(ctx: Context): Promise<void> {
     .text('✓ Initialize', `init:confirm:${pathId}`)
     .text('❌ Cancel', 'init:cancel');
 
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     '📁 *Initialize Project*\n\n' +
       `Path: \`${pathInfo.path}\`\n` +
       (pathInfo.description ? `Description: ${pathInfo.description}\n` : '') +
@@ -192,7 +193,7 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
   }
 
   // Update message to show progress
-  await ctx.editMessageText(
+  await safeEditMessage(ctx,
     '⏳ *Initializing Project*\n\n' +
       `Path: \`${pathInfo.path}\`\n\n` +
       '_Please wait..._',
@@ -207,7 +208,7 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
 
     if (result.success) {
       const projectName = pathInfo.path.split('/').pop() ?? 'project';
-      await ctx.editMessageText(
+      await safeEditMessage(ctx,
         '✅ *Project Initialized!*\n\n' +
           `Path: \`${pathInfo.path}\`\n\n` +
           `You can now use \`/${projectName}\` commands:\n` +
@@ -217,7 +218,7 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
         { parse_mode: 'Markdown' }
       );
     } else {
-      await ctx.editMessageText(
+      await safeEditMessage(ctx,
         '❌ *Initialization Failed*\n\n' +
           `Path: \`${pathInfo.path}\`\n` +
           `Error: ${result.error ?? 'Unknown error'}`,
@@ -226,7 +227,7 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-    await ctx.editMessageText(
+    await safeEditMessage(ctx,
       '❌ *Initialization Failed*\n\n' +
         `Path: \`${pathInfo.path}\`\n` +
         `Error: ${errorMsg}`,
@@ -239,7 +240,7 @@ async function handleInitConfirm(ctx: Context): Promise<void> {
  * Handle init cancellation
  */
 async function handleInitCancel(ctx: Context): Promise<void> {
-  await ctx.editMessageText('_Initialization cancelled._', {
+  await safeEditMessage(ctx, '_Initialization cancelled._', {
     parse_mode: 'Markdown',
   });
   await ctx.answerCallbackQuery();
