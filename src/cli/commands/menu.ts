@@ -1564,11 +1564,13 @@ async function runUnifiedSubFlow(
 
     // Handle response
     const result = await subRunner.handleResponse(response);
-    const ctx = subRunner.getContext();
 
-    // Check for action markers
-    if (ctx.selectedAction && isActionMarker(ctx.selectedAction)) {
-      const actionName = getActionName(ctx.selectedAction);
+    // Check for action markers - the step handler returns 'action:xyz' as "next step"
+    // which FlowRunner sets as currentStepId
+    const currentStepId = subRunner.getCurrentStepId();
+    if (isActionMarker(currentStepId)) {
+      const actionName = getActionName(currentStepId);
+      const ctx = subRunner.getContext();
       const actionResult = await executeAction(actionName, ctx, 'cli');
 
       if (actionResult.error) {
@@ -1578,6 +1580,9 @@ async function runUnifiedSubFlow(
       // Navigate to the step returned by the action
       if (actionResult.nextStep) {
         subRunner.navigateTo(actionResult.nextStep);
+      } else {
+        // No next step from action - go back to menu
+        subRunner.navigateTo('menu');
       }
 
       // Refresh context after action
