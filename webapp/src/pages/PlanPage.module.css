@@ -255,4 +255,92 @@
 .empty p {
   color: var(--hint-color);
   font-size: var(--font-size-sm);
+  margin: 0 0 var(--spacing-lg);
+}
+
+.startPlanButton {
+  background: var(--button-color);
+  color: var(--button-text-color);
+  border: none;
+  padding: var(--spacing-sm) var(--spacing-xl);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.startPlanButton:hover {
+  opacity: 0.9;
+}
+
+.startPlanButton:active {
+  transform: scale(0.98);
+}
+
+/* Modal */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--spacing-md);
+}
+
+.modal {
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-lg);
+  width: 100%;
+  max-width: 400px;
+}
+
+.modalTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  margin: 0 0 var(--spacing-sm);
+}
+
+.modalDescription {
+  font-size: var(--font-size-sm);
+  color: var(--hint-color);
+  margin: 0 0 var(--spacing-lg);
+  line-height: 1.5;
+}
+
+.modalActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
+}
+
+.modalCancel {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-color);
+  border: none;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.modalSubmit {
+  background: var(--button-color);
+  color: var(--button-text-color);
+  border: none;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.modalSubmit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

@@ -60,7 +60,8 @@ export function createDashboardRouter(): Router {
   // Helper to get project store
   const getProjectStore = (projectId: string) => {
     const registry = getProjectRegistry();
-    const project = registry.getProject(projectId);
+    // Try UUID lookup first, then fall back to name/alias
+    const project = registry.getProjectById(projectId) ?? registry.getProject(projectId);
     if (!project) return null;
     return { store: createStore(project.path), project };
   };

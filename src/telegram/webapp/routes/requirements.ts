@@ -22,7 +22,8 @@ export function createRequirementsRouter(): Router {
   // Helper to get project store
   const getProjectStore = (projectId: string) => {
     const registry = getProjectRegistry();
-    const project = registry.getProject(projectId);
+    // Try UUID lookup first, then fall back to name/alias
+    const project = registry.getProjectById(projectId) ?? registry.getProject(projectId);
     if (!project) return null;
     return { store: createStore(project.path), project };
   };
@@ -426,7 +427,7 @@ export function createRequirementsRouter(): Router {
         const reqId = req.params.reqId as string;
 
         const registry = getProjectRegistry();
-        const project = registry.getProject(projectId);
+        const project = registry.getProjectById(projectId) ?? registry.getProject(projectId);
 
         if (!project) {
           res.status(404).json({

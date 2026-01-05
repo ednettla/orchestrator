@@ -74,8 +74,8 @@ export function createProjectsRouter(): Router {
     try {
       const projectId = req.params.projectId as string;
 
-      // Look up by path, name, or alias
-      const project = registry.getProject(projectId);
+      // Look up by ID first, then fall back to path/name/alias
+      const project = registry.getProjectById(projectId) ?? registry.getProject(projectId);
 
       if (!project) {
         res.status(404).json({

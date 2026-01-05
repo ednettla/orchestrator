@@ -23,6 +23,8 @@ export default function Layout({ user }: LayoutProps) {
   const projectMatch = location.pathname.match(/\/project\/([^/]+)/);
   const projectId = projectMatch?.[1];
 
+  const isAdmin = user.role === 'admin';
+
   const navItems = projectId
     ? [
         { path: `/project/${projectId}/dashboard`, label: 'Dashboard', icon: '📊' },
@@ -32,6 +34,7 @@ export default function Layout({ user }: LayoutProps) {
     : [
         { path: '/projects', label: 'Projects', icon: '📁' },
         { path: '/auth', label: 'Auth', icon: '🔐' },
+        ...(isAdmin ? [{ path: '/admin', label: 'Admin', icon: '⚙️' }] : []),
       ];
 
   return (

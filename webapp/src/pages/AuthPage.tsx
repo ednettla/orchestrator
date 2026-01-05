@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useTelegram } from '../hooks/useTelegram';
 import styles from './AuthPage.module.css';
 
 // Types
@@ -73,6 +74,7 @@ interface PipelinesResponse {
 
 export default function AuthPage() {
   const queryClient = useQueryClient();
+  const { showConfirm, haptic } = useTelegram();
   const [activeTab, setActiveTab] = useState<'status' | 'sources' | 'pipelines'>('status');
 
   // Fetch auth status
@@ -141,8 +143,33 @@ export default function AuthPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth-sources'] });
       queryClient.invalidateQueries({ queryKey: ['auth-status'] });
+      haptic?.notificationOccurred('success');
     },
   });
+
+  // Delete auth source mutation
+  const deleteSource = useMutation({
+    mutationFn: async (sourceName: string) => {
+      const response = await api.delete(`/auth/sources/${sourceName}`);
+      if (!response.success) throw new Error(response.error?.message ?? 'Failed to delete source');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['auth-sources'] });
+      queryClient.invalidateQueries({ queryKey: ['auth-status'] });
+      haptic?.notificationOccurred('success');
+    },
+  });
+
+  const handleDeleteSource = async (source: AuthSource) => {
+    const warning = source.isDefault
+      ? `This is the default ${source.service} source. Deleting it will require re-authentication. Continue?`
+      : `Delete auth source "${source.displayName}"?`;
+
+    const confirmed = await showConfirm(warning);
+    if (confirmed) {
+      deleteSource.mutate(source.name);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -270,15 +297,24 @@ export default function AuthPage() {
                       </span>
                     )}
                   </div>
-                  {!source.isDefault && (
+                  <div className={styles.sourceActions}>
+                    {!source.isDefault && (
+                      <button
+                        className={styles.setDefaultButton}
+                        onClick={() => setDefault.mutate(source.name)}
+                        disabled={setDefault.isPending}
+                      >
+                        Set as Default
+                      </button>
+                    )}
                     <button
-                      className={styles.setDefaultButton}
-                      onClick={() => setDefault.mutate(source.name)}
-                      disabled={setDefault.isPending}
+                      className={styles.deleteButton}
+                      onClick={() => handleDeleteSource(source)}
+                      disabled={deleteSource.isPending}
                     >
-                      Set as Default
+                      Delete
                     </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -286,7 +322,10 @@ export default function AuthPage() {
             <div className={styles.empty}>
               <span className={styles.emptyIcon}>🔐</span>
               <p>No auth sources configured</p>
-              <p className={styles.emptyHint}>Use the CLI to add auth sources</p>
+              <p className={styles.emptyHint}>
+                Auth sources are created when you connect to services during project setup.
+                Initialize a project with <code className={styles.code}>orchestrate init</code> to configure GitHub, Supabase, or Vercel authentication.
+              </p>
             </div>
           )}
         </div>

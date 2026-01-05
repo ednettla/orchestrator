@@ -1,12 +1,14 @@
 /**
  * Projects Page
  *
- * List of all projects.
+ * List of all projects with creation capability.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useTelegram } from '../hooks/useTelegram';
 import styles from './ProjectsPage.module.css';
 
 interface Project {
@@ -22,8 +24,25 @@ interface ProjectsResponse {
   projects: Project[];
 }
 
+interface AllowedPath {
+  id: string;
+  path: string;
+  description?: string;
+}
+
+interface AllowedPathsResponse {
+  success: boolean;
+  paths: AllowedPath[];
+}
+
 export default function ProjectsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { haptic } = useTelegram();
+
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string>('');
+  const [projectName, setProjectName] = useState('');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['projects'],
@@ -35,6 +54,54 @@ export default function ProjectsPage() {
       return response.data!.projects;
     },
   });
+
+  // Fetch allowed paths for project creation
+  const { data: allowedPaths } = useQuery({
+    queryKey: ['allowed-paths'],
+    queryFn: async () => {
+      const response = await api.get<AllowedPathsResponse>('/admin/allowed-paths');
+      if (!response.success) {
+        // Not an error - user may not be admin
+        return [];
+      }
+      return response.data!.paths;
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async ({ path, name }: { path: string; name: string }) => {
+      const response = await api.post('/projects/init', {
+        path: `${path}/${name}`,
+        name,
+      });
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to create project');
+      }
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setShowCreateModal(false);
+      setSelectedPath('');
+      setProjectName('');
+      haptic?.notificationOccurred('success');
+    },
+  });
+
+  const handleCreate = () => {
+    if (selectedPath && projectName.trim()) {
+      createMutation.mutate({ path: selectedPath, name: projectName.trim() });
+    }
+  };
+
+  const openCreateModal = () => {
+    // Pre-select first allowed path if available
+    if (allowedPaths && allowedPaths.length > 0) {
+      setSelectedPath(allowedPaths[0].path);
+    }
+    setShowCreateModal(true);
+    haptic?.selectionChanged();
+  };
 
   if (isLoading) {
     return (
@@ -59,7 +126,60 @@ export default function ProjectsPage() {
       <div className={styles.empty}>
         <div className={styles.emptyIcon}>📁</div>
         <h2>No Projects</h2>
-        <p>Initialize a project from the Telegram bot to get started.</p>
+        <p>Create your first project to get started.</p>
+        {allowedPaths && allowedPaths.length > 0 && (
+          <button className={styles.createButton} onClick={openCreateModal}>
+            Create Project
+          </button>
+        )}
+
+        {showCreateModal && (
+          <div className={styles.modalOverlay} onClick={() => setShowCreateModal(false)}>
+            <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <h3 className={styles.modalTitle}>Create Project</h3>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Location</label>
+                <select
+                  className={styles.formSelect}
+                  value={selectedPath}
+                  onChange={(e) => setSelectedPath(e.target.value)}
+                >
+                  {allowedPaths?.map((p) => (
+                    <option key={p.id} value={p.path}>
+                      {p.path}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Project Name</label>
+                <input
+                  type="text"
+                  className={styles.formInput}
+                  placeholder="my-project"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className={styles.modalActions}>
+                <button
+                  className={styles.modalCancel}
+                  onClick={() => setShowCreateModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.modalSubmit}
+                  onClick={handleCreate}
+                  disabled={!projectName.trim() || createMutation.isPending}
+                >
+                  {createMutation.isPending ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -84,6 +204,62 @@ export default function ProjectsPage() {
           </button>
         ))}
       </div>
+
+      {/* Floating Action Button */}
+      {allowedPaths && allowedPaths.length > 0 && (
+        <button className={styles.fab} onClick={openCreateModal}>
+          +
+        </button>
+      )}
+
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowCreateModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>Create Project</h3>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Location</label>
+              <select
+                className={styles.formSelect}
+                value={selectedPath}
+                onChange={(e) => setSelectedPath(e.target.value)}
+              >
+                {allowedPaths?.map((p) => (
+                  <option key={p.id} value={p.path}>
+                    {p.path}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Project Name</label>
+              <input
+                type="text"
+                className={styles.formInput}
+                placeholder="my-project"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className={styles.modalActions}>
+              <button
+                className={styles.modalCancel}
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.modalSubmit}
+                onClick={handleCreate}
+                disabled={!projectName.trim() || createMutation.isPending}
+              >
+                {createMutation.isPending ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

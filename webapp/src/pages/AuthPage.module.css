@@ -218,7 +218,7 @@
 }
 
 .setDefaultButton {
-  margin-top: var(--spacing-sm);
+  flex: 1;
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-color);
   border: none;
@@ -226,11 +226,11 @@
   border-radius: var(--border-radius-sm);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  width: 100%;
 }
 
 .setDefaultButton:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Pipeline List */
@@ -349,5 +349,36 @@
 .emptyHint {
   color: var(--hint-color);
   font-size: var(--font-size-sm);
-  margin-top: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+  line-height: 1.5;
+}
+
+.code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+}
+
+/* Source Actions */
+.sourceActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.deleteButton {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--status-failed);
+  border: none;
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

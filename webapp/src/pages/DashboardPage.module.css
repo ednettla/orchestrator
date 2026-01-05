@@ -160,6 +160,36 @@
   margin-top: var(--spacing-lg);
 }
 
+.sectionHeader {
+  margin-bottom: var(--spacing-md);
+}
+
+.sectionTabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  background: var(--secondary-bg-color);
+  padding: var(--spacing-xs);
+  border-radius: var(--border-radius);
+}
+
+.sectionTab {
+  flex: 1;
+  padding: var(--spacing-sm);
+  background: transparent;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  color: var(--hint-color);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.sectionTab.active {
+  background: var(--button-color);
+  color: var(--button-text-color);
+}
+
 .sectionTitle {
   font-size: var(--font-size-base);
   font-weight: 600;
@@ -208,6 +238,64 @@
   color: var(--hint-color);
   font-size: var(--font-size-sm);
   padding: var(--spacing-lg);
+}
+
+/* Logs */
+.logsList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--secondary-bg-color);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-sm);
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: monospace;
+}
+
+.logItem {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-xs);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.logItem.error {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.logItem.warning {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.logTime {
+  color: var(--hint-color);
+  flex-shrink: 0;
+}
+
+.logLevel {
+  flex-shrink: 0;
+  min-width: 50px;
+  font-weight: 600;
+}
+
+.logLevel.info {
+  color: var(--status-completed);
+}
+
+.logLevel.error {
+  color: var(--status-failed);
+}
+
+.logLevel.warning {
+  color: var(--status-pending);
+}
+
+.logMessage {
+  flex: 1;
+  word-break: break-word;
 }
 
 /* States */

@@ -16,6 +16,7 @@ import RequirementsPage from './pages/RequirementsPage';
 import PlanPage from './pages/PlanPage';
 import DashboardPage from './pages/DashboardPage';
 import AuthPage from './pages/AuthPage';
+import AdminPage from './pages/AdminPage';
 
 // Components
 import Layout from './components/Layout';
@@ -117,6 +118,7 @@ function App() {
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="auth" element={<AuthPage />} />
+          <Route path="admin" element={<AdminPage />} />
           <Route path="project/:projectId" element={<ProjectPage />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />

@@ -34,11 +34,14 @@ const STATUS_ICONS: Record<string, string> = {
 export default function RequirementsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const { haptic, mainButton } = useTelegram();
+  const { haptic } = useTelegram();
 
   const [filter, setFilter] = useState<string>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newReqText, setNewReqText] = useState('');
+  const [newReqPriority, setNewReqPriority] = useState(5);
 
   const { data: requirements, isLoading, error } = useQuery({
     queryKey: ['requirements', projectId],
@@ -50,6 +53,25 @@ export default function RequirementsPage() {
         throw new Error(response.error?.message ?? 'Failed to load requirements');
       }
       return response.data!.requirements;
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async ({ text, priority }: { text: string; priority: number }) => {
+      const response = await api.post(`/projects/${projectId}/requirements`, {
+        title: text,  // API expects 'title'
+        priority,
+      });
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to create');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requirements', projectId] });
+      setShowAddModal(false);
+      setNewReqText('');
+      setNewReqPriority(5);
+      haptic?.notificationOccurred('success');
     },
   });
 
@@ -82,6 +104,19 @@ export default function RequirementsPage() {
     },
   });
 
+  const runMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.post(`/projects/${projectId}/requirements/${id}/run`);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to run');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['requirements', projectId] });
+      haptic?.notificationOccurred('success');
+    },
+  });
+
   const handleEdit = (req: Requirement) => {
     setEditingId(req.id);
     setEditText(req.rawInput);
@@ -97,6 +132,17 @@ export default function RequirementsPage() {
   const handleDelete = async (id: string) => {
     haptic?.impactOccurred('medium');
     deleteMutation.mutate(id);
+  };
+
+  const handleRun = (id: string) => {
+    haptic?.impactOccurred('light');
+    runMutation.mutate(id);
+  };
+
+  const handleCreate = () => {
+    if (newReqText.trim()) {
+      createMutation.mutate({ text: newReqText.trim(), priority: newReqPriority });
+    }
   };
 
   if (isLoading) {
@@ -132,6 +178,9 @@ export default function RequirementsPage() {
       {filteredReqs.length === 0 ? (
         <div className={styles.empty}>
           <p>No {filter === 'all' ? '' : filter.replace('_', ' ')} requirements</p>
+          <button className={styles.addButton} onClick={() => setShowAddModal(true)}>
+            Add Requirement
+          </button>
         </div>
       ) : (
         <div className={styles.list}>
@@ -171,6 +220,15 @@ export default function RequirementsPage() {
                   </div>
                   <p className={styles.text}>{req.rawInput}</p>
                   <div className={styles.cardActions}>
+                    {(req.status === 'pending' || req.status === 'failed') && (
+                      <button
+                        className={`${styles.actionButton} ${styles.primary}`}
+                        onClick={() => handleRun(req.id)}
+                        disabled={runMutation.isPending}
+                      >
+                        {req.status === 'failed' ? 'Retry' : 'Run'}
+                      </button>
+                    )}
                     <button
                       className={styles.actionButton}
                       onClick={() => handleEdit(req)}
@@ -180,7 +238,7 @@ export default function RequirementsPage() {
                     <button
                       className={`${styles.actionButton} ${styles.danger}`}
                       onClick={() => handleDelete(req.id)}
-                      disabled={deleteMutation.isPending}
+                      disabled={deleteMutation.isPending || req.status === 'in_progress'}
                     >
                       Delete
                     </button>
@@ -189,6 +247,56 @@ export default function RequirementsPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Floating Add Button */}
+      <button className={styles.fab} onClick={() => setShowAddModal(true)}>
+        +
+      </button>
+
+      {/* Add Requirement Modal */}
+      {showAddModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowAddModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>Add Requirement</h3>
+            <textarea
+              className={styles.modalInput}
+              placeholder="Describe the requirement..."
+              value={newReqText}
+              onChange={(e) => setNewReqText(e.target.value)}
+              rows={4}
+              autoFocus
+            />
+            <div className={styles.prioritySection}>
+              <label className={styles.priorityLabel}>
+                Priority: {newReqPriority}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="10"
+                value={newReqPriority}
+                onChange={(e) => setNewReqPriority(parseInt(e.target.value))}
+                className={styles.prioritySlider}
+              />
+            </div>
+            <div className={styles.modalActions}>
+              <button
+                className={styles.modalCancel}
+                onClick={() => setShowAddModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.modalSubmit}
+                onClick={handleCreate}
+                disabled={!newReqText.trim() || createMutation.isPending}
+              >
+                {createMutation.isPending ? 'Adding...' : 'Add'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

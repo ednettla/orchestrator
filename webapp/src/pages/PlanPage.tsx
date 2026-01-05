@@ -45,6 +45,8 @@ export default function PlanPage() {
 
   const [answerText, setAnswerText] = useState('');
   const [answeringId, setAnsweringId] = useState<string | null>(null);
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [goalText, setGoalText] = useState('');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['plan', projectId],
@@ -100,6 +102,25 @@ export default function PlanPage() {
     },
   });
 
+  const startPlanMutation = useMutation({
+    mutationFn: async () => {
+      const response = await api.post(`/projects/${projectId}/plans`);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to start plan');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plan', projectId] });
+      setShowStartModal(false);
+      setGoalText('');
+      haptic?.notificationOccurred('success');
+    },
+  });
+
+  const handleStartPlan = () => {
+    startPlanMutation.mutate();
+  };
+
   const handleAnswer = (question: Question) => {
     setAnsweringId(question.id);
     setAnswerText('');
@@ -142,7 +163,40 @@ export default function PlanPage() {
       <div className={styles.empty}>
         <div className={styles.emptyIcon}>📝</div>
         <h2>No Active Plan</h2>
-        <p>Start planning from the Telegram bot using the plan command.</p>
+        <p>Start autonomous planning to analyze your project and generate requirements.</p>
+        <button
+          className={styles.startPlanButton}
+          onClick={() => setShowStartModal(true)}
+        >
+          Start Planning
+        </button>
+
+        {showStartModal && (
+          <div className={styles.modalOverlay} onClick={() => setShowStartModal(false)}>
+            <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <h3 className={styles.modalTitle}>Start Autonomous Planning</h3>
+              <p className={styles.modalDescription}>
+                The AI will analyze your project, ask clarifying questions, and generate
+                a detailed plan with requirements.
+              </p>
+              <div className={styles.modalActions}>
+                <button
+                  className={styles.modalCancel}
+                  onClick={() => setShowStartModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className={styles.modalSubmit}
+                  onClick={handleStartPlan}
+                  disabled={startPlanMutation.isPending}
+                >
+                  {startPlanMutation.isPending ? 'Starting...' : 'Start'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

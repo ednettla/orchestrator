@@ -1,9 +1,10 @@
 /**
  * Dashboard Page
  *
- * Project overview with stats and activity feed.
+ * Project overview with stats, activity feed, and execution logs.
  */
 
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -63,8 +64,22 @@ interface ActivityResponse {
   activity: ActivityItem[];
 }
 
+interface LogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  taskId?: string;
+}
+
+interface LogsResponse {
+  success: boolean;
+  logs: LogEntry[];
+  hasMore: boolean;
+}
+
 export default function DashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [activeTab, setActiveTab] = useState<'activity' | 'logs'>('activity');
 
   const { data: dashboard, isLoading: dashboardLoading } = useQuery({
     queryKey: ['dashboard', projectId],
@@ -89,6 +104,22 @@ export default function DashboardPage() {
       }
       return response.data!.activity;
     },
+    enabled: activeTab === 'activity',
+  });
+
+  const { data: logs, isLoading: logsLoading } = useQuery({
+    queryKey: ['logs', projectId],
+    queryFn: async () => {
+      const response = await api.get<LogsResponse>(
+        `/projects/${projectId}/dashboard/logs?lines=50`
+      );
+      if (!response.success) {
+        throw new Error(response.error?.message ?? 'Failed to load logs');
+      }
+      return response.data!.logs;
+    },
+    enabled: activeTab === 'logs',
+    refetchInterval: activeTab === 'logs' ? 5000 : false, // Auto-refresh logs
   });
 
   if (dashboardLoading) {
@@ -170,29 +201,76 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Activity Feed */}
+      {/* Activity/Logs Section */}
       <div className={styles.activitySection}>
-        <h3 className={styles.sectionTitle}>Recent Activity</h3>
-        {activityLoading ? (
-          <div className={styles.loading}>Loading activity...</div>
-        ) : activity && activity.length > 0 ? (
-          <div className={styles.activityList}>
-            {activity.map((item) => (
-              <div key={item.id} className={styles.activityItem}>
-                <span className={styles.activityIcon}>
-                  {item.type === 'requirement' ? '📋' : item.type === 'task' ? '⚙️' : '📝'}
-                </span>
-                <div className={styles.activityContent}>
-                  <p className={styles.activityDescription}>{item.description}</p>
-                  <span className={styles.activityTime}>
-                    {new Date(item.timestamp).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            ))}
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTabs}>
+            <button
+              className={`${styles.sectionTab} ${activeTab === 'activity' ? styles.active : ''}`}
+              onClick={() => setActiveTab('activity')}
+            >
+              Activity
+            </button>
+            <button
+              className={`${styles.sectionTab} ${activeTab === 'logs' ? styles.active : ''}`}
+              onClick={() => setActiveTab('logs')}
+            >
+              Logs
+            </button>
           </div>
-        ) : (
-          <p className={styles.noActivity}>No recent activity</p>
+        </div>
+
+        {activeTab === 'activity' && (
+          <>
+            {activityLoading ? (
+              <div className={styles.loading}>Loading activity...</div>
+            ) : activity && activity.length > 0 ? (
+              <div className={styles.activityList}>
+                {activity.map((item) => (
+                  <div key={item.id} className={styles.activityItem}>
+                    <span className={styles.activityIcon}>
+                      {item.type === 'requirement' ? '📋' : item.type === 'task' ? '⚙️' : '📝'}
+                    </span>
+                    <div className={styles.activityContent}>
+                      <p className={styles.activityDescription}>{item.description}</p>
+                      <span className={styles.activityTime}>
+                        {new Date(item.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.noActivity}>No recent activity</p>
+            )}
+          </>
+        )}
+
+        {activeTab === 'logs' && (
+          <>
+            {logsLoading ? (
+              <div className={styles.loading}>Loading logs...</div>
+            ) : logs && logs.length > 0 ? (
+              <div className={styles.logsList}>
+                {logs.map((log, index) => (
+                  <div
+                    key={`${log.timestamp}-${index}`}
+                    className={`${styles.logItem} ${styles[log.level] ?? ''}`}
+                  >
+                    <span className={styles.logTime}>
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                    <span className={`${styles.logLevel} ${styles[log.level] ?? ''}`}>
+                      {log.level.toUpperCase()}
+                    </span>
+                    <span className={styles.logMessage}>{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.noActivity}>No logs available</p>
+            )}
+          </>
         )}
       </div>
     </div>
