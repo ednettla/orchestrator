@@ -9,7 +9,6 @@
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
-import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { projectSelectionKeyboard } from '../keyboards.js';
 import { createProject } from '../project-bridge.js';
 
@@ -167,24 +166,9 @@ export async function newProjectHandler(ctx: CommandContext): Promise<CommandRes
     };
   }
 
-  // Get the first allowed path as the base directory
-  const pathsManager = getAllowedPathsManager();
-  const allowedPaths = pathsManager.listPaths();
-  const firstAllowedPath = allowedPaths[0];
-
-  if (!firstAllowedPath) {
-    return {
-      success: false,
-      response:
-        '⚠️ No allowed paths configured.\n\n' +
-        'An admin needs to add an allowed path first:\n' +
-        '`/paths add /path/to/projects`',
-      parseMode: 'Markdown',
-    };
-  }
-
-  // Use the first allowed path as the base
-  const basePath = firstAllowedPath.path;
+  // Get the projects directory from global store
+  const store = getGlobalStore();
+  const basePath = store.getProjectsDirectory();
 
   // Create the project
   const result = await createProject(basePath, projectName);

@@ -970,7 +970,14 @@ export async function createProject(
 ): Promise<CreateProjectResult> {
   const projectPath = path.join(basePath, projectName);
 
-  // Check if directory already exists
+  // Ensure base directory exists
+  try {
+    mkdirSync(basePath, { recursive: true });
+  } catch {
+    // Ignore if already exists
+  }
+
+  // Check if project directory already exists
   if (existsSync(projectPath)) {
     return {
       success: false,
@@ -979,7 +986,7 @@ export async function createProject(
     };
   }
 
-  // Create directory
+  // Create project directory
   try {
     mkdirSync(projectPath, { recursive: true });
   } catch (err) {

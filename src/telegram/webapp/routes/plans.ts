@@ -107,14 +107,18 @@ export function createPlansRouter(): Router {
 
       const { store, project } = context;
 
-      // Get session
+      // Get session - if no session, project not initialized
       const session = store.getSessionByPath(project.path);
       if (!session) {
-        res.status(404).json({
-          success: false,
-          error: { code: 'SESSION_NOT_FOUND', message: 'Project not initialized' },
-        });
         store.close();
+        // Return gracefully - no plan available yet
+        res.json({
+          success: true,
+          plan: null,
+          hasActivePlan: false,
+          hasPendingQuestions: false,
+          pendingQuestions: [],
+        });
         return;
       }
 
@@ -128,6 +132,8 @@ export function createPlansRouter(): Router {
           success: true,
           plan: null,
           hasActivePlan: false,
+          hasPendingQuestions: false,
+          pendingQuestions: [],
         });
         return;
       }
