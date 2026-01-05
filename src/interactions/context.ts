@@ -86,8 +86,11 @@ export async function buildFlowContext(
     context.plan = store.getActivePlan(session.id);
 
     sessionManager.close();
-  } catch {
-    // Project not initialized - that's ok
+  } catch (error) {
+    // Project not initialized or database error - log for debugging
+    if (process.env.DEBUG) {
+      console.debug('[FlowContext] Failed to load project state:', error instanceof Error ? error.message : error);
+    }
     sessionManager.close();
   }
 

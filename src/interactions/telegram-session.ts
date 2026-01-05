@@ -41,6 +41,25 @@ interface ActiveSession {
 class TelegramFlowSessionManager {
   private sessions = new Map<number, ActiveSession>();
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Start periodic cleanup every 5 minutes to prevent memory leaks
+    this.cleanupInterval = setInterval(() => {
+      this.cleanup();
+    }, 5 * 60 * 1000);
+  }
+
+  /**
+   * Stop the cleanup interval (for testing/shutdown)
+   */
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.sessions.clear();
+  }
 
   /**
    * Start a new flow session for a user
@@ -258,12 +277,17 @@ class TelegramFlowSessionManager {
       }
 
       // Start a new session with this flow
-      const role = (ctx as unknown as { authorizedUser?: { role: string } }).authorizedUser?.role ?? 'viewer';
+      // Safely extract and validate role from context
+      const rawRole = (ctx as unknown as { authorizedUser?: { role: string } }).authorizedUser?.role;
+      const validRoles = ['admin', 'operator', 'viewer'] as const;
+      const role: 'admin' | 'operator' | 'viewer' = validRoles.includes(rawRole as typeof validRoles[number])
+        ? (rawRole as 'admin' | 'operator' | 'viewer')
+        : 'viewer';
       await this.startSession(
         ctx,
         flow,
         projectPath ?? process.cwd(),
-        role as 'admin' | 'operator' | 'viewer'
+        role
       );
       return;
     }

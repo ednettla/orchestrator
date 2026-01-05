@@ -125,8 +125,12 @@ export const planEditReqsFlow: Flow<PlanEditContext> = {
 
         const match = (response as string).match(/^req_(\d+)$/);
         if (match?.[1]) {
-          ctx.selectedReqIndex = parseInt(match[1], 10);
-          return 'select_field';
+          const index = parseInt(match[1], 10);
+          // Bounds check to prevent array out of bounds
+          if (ctx.plan && index >= 0 && index < ctx.plan.requirements.length) {
+            ctx.selectedReqIndex = index;
+            return 'select_field';
+          }
         }
         return 'menu';
       },
@@ -274,8 +278,12 @@ export const planEditReqsFlow: Flow<PlanEditContext> = {
 
         const match = (response as string).match(/^req_(\d+)$/);
         if (match?.[1]) {
-          ctx.reorderFrom = parseInt(match[1], 10);
-          return 'select_req_to';
+          const index = parseInt(match[1], 10);
+          // Bounds check
+          if (ctx.plan && index >= 0 && index < ctx.plan.requirements.length) {
+            ctx.reorderFrom = index;
+            return 'select_req_to';
+          }
         }
         return 'menu';
       },
@@ -293,8 +301,12 @@ export const planEditReqsFlow: Flow<PlanEditContext> = {
 
         const match = (response as string).match(/^req_(\d+)$/);
         if (match?.[1]) {
-          ctx.selectedReqIndex = parseInt(match[1], 10);
-          return 'action:reorder_req';
+          const index = parseInt(match[1], 10);
+          // Bounds check and ensure not same as from index
+          if (ctx.plan && index >= 0 && index < ctx.plan.requirements.length && index !== ctx.reorderFrom) {
+            ctx.selectedReqIndex = index;
+            return 'action:reorder_req';
+          }
         }
         return 'menu';
       },
@@ -315,8 +327,12 @@ export const planEditReqsFlow: Flow<PlanEditContext> = {
 
         const match = (response as string).match(/^req_(\d+)$/);
         if (match?.[1]) {
-          ctx.selectedReqIndex = parseInt(match[1], 10);
-          return 'confirm_remove';
+          const index = parseInt(match[1], 10);
+          // Bounds check to prevent array out of bounds
+          if (ctx.plan && index >= 0 && index < ctx.plan.requirements.length) {
+            ctx.selectedReqIndex = index;
+            return 'confirm_remove';
+          }
         }
         return 'menu';
       },
@@ -490,8 +506,12 @@ export const planEditQuestionsFlow: Flow<PlanEditContext> = {
 
         const match = (response as string).match(/^q_(\d+)$/);
         if (match?.[1]) {
-          ctx.selectedQuestionIndex = parseInt(match[1], 10);
-          return 'show_question';
+          const index = parseInt(match[1], 10);
+          // Bounds check to prevent array out of bounds
+          if (ctx.plan && index >= 0 && index < ctx.plan.questions.length) {
+            ctx.selectedQuestionIndex = index;
+            return 'show_question';
+          }
         }
         return 'menu';
       },
