@@ -334,6 +334,22 @@ export const planMenuFlow: Flow<PlanFlowContext> = {
         return 'menu';
       },
     },
+
+    // ========================================================================
+    // Error State
+    // ========================================================================
+    error: {
+      id: 'error',
+      interaction: (ctx) => ({
+        type: 'display',
+        message: ctx.error ?? 'An error occurred',
+        format: 'error',
+      }),
+      handle: async (_, ctx) => {
+        delete ctx.error;
+        return 'menu';
+      },
+    },
   },
 };
 

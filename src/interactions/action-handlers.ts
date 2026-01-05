@@ -12,7 +12,13 @@ import type { DaemonFlowContext } from './flows/daemon.js';
 import type { RunFlowContext } from './flows/run.js';
 import type { RequirementsFlowContext } from './flows/requirements.js';
 import type { PlanFlowContext } from './flows/plan.js';
+import type { PlanEditContext } from './flows/plan-edit.js';
 import type { ConfigFlowContext } from './flows/config.js';
+import type { InitFlowContext } from './flows/init.js';
+import type { WorktreesFlowContext, WorktreeHealth } from './flows/worktrees.js';
+import type { SecretsFlowContext } from './flows/secrets.js';
+import type { ProjectsFlowContext } from './flows/projects.js';
+import type { TelegramSettingsFlowContext } from './flows/telegram-settings.js';
 
 // ============================================================================
 // Action Handler Types
@@ -456,6 +462,338 @@ export const rejectPlanAction: ActionHandler<PlanFlowContext> = async (ctx) => {
 };
 
 // ============================================================================
+// Init Actions
+// ============================================================================
+
+/**
+ * Initialize a project
+ */
+export const initProjectAction: ActionHandler<InitFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'error', error: 'Use CLI to initialize projects' };
+  }
+
+  try {
+    const { initCommand } = await import('../cli/commands/init.js');
+    const { mcpConfigManager } = await import('../core/mcp-config-manager.js');
+
+    if (!ctx.projectPath) {
+      return { nextStep: 'error', error: 'No project path' };
+    }
+
+    await initCommand({
+      path: ctx.projectPath,
+      interactive: true,
+      claudeMd: true,
+      cloud: true,
+    });
+
+    // Check if init was successful by looking for MCP config
+    try {
+      const mcpConfig = await mcpConfigManager.getMergedConfig(ctx.projectPath);
+      const enabledServers = Object.entries(mcpConfig.mcpServers)
+        .filter(([, config]) => config.enabled)
+        .map(([name]) => name);
+
+      ctx.mcpServers = enabledServers;
+      ctx.initSuccess = true;
+    } catch {
+      // Project may not have MCP but still be initialized
+      ctx.initSuccess = true;
+    }
+
+    return { nextStep: 'init_complete' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Init failed';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
+// Worktree Actions
+// ============================================================================
+
+/**
+ * Check worktree health and populate context
+ */
+export const checkWorktreeHealthAction: ActionHandler<WorktreesFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'error', error: 'Worktree management is CLI-only' };
+  }
+
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { createWorktreeHealthChecker } = await import('../core/worktree-health.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    const session = await sessionManager.resumeSession(ctx.projectPath);
+    const store = sessionManager.getStore();
+    const checker = createWorktreeHealthChecker(ctx.projectPath, store);
+
+    const health = await checker.checkHealth(session.id);
+
+    // Store health data in context
+    ctx.worktreeHealth = {
+      isGitRepo: health.isGitRepo,
+      healthy: health.healthy,
+      gitCount: health.gitWorktrees.length - 1, // Exclude main worktree
+      dbCount: health.dbWorktrees.filter(w => w.status === 'active').length,
+      issueCount: health.issues.length,
+      fixableCount: health.issues.filter(i => i.autoFixable).length,
+      issues: health.issues.map(i => ({
+        description: i.description,
+        autoFixable: i.autoFixable,
+      })),
+    };
+
+    sessionManager.close();
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to check worktree health';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Repair worktree issues
+ */
+export const repairWorktreesAction: ActionHandler<WorktreesFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'error', error: 'Worktree management is CLI-only' };
+  }
+
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { createWorktreeHealthChecker } = await import('../core/worktree-health.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    const session = await sessionManager.resumeSession(ctx.projectPath);
+    const store = sessionManager.getStore();
+    const checker = createWorktreeHealthChecker(ctx.projectPath, store);
+
+    // Re-check health to get current issues
+    const health = await checker.checkHealth(session.id);
+    const fixableIssues = health.issues.filter(i => i.autoFixable);
+
+    if (fixableIssues.length === 0) {
+      ctx.resultMessage = 'No auto-fixable issues found.';
+      sessionManager.close();
+      return { nextStep: 'show_result' };
+    }
+
+    // Perform repairs
+    const result = await checker.repair(fixableIssues);
+    sessionManager.close();
+
+    // Build result message
+    const lines: string[] = [`Repaired ${result.fixed.length} issue(s):`];
+    for (const fixed of result.fixed) {
+      lines.push(`  ✓ ${fixed}`);
+    }
+    for (const failed of result.failed) {
+      lines.push(`  ✗ ${failed.issue}: ${failed.error}`);
+    }
+
+    ctx.resultMessage = lines.join('\n');
+    return { nextStep: 'show_result' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to repair worktrees';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * View worktree details
+ */
+export const viewWorktreeDetailsAction: ActionHandler<WorktreesFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'error', error: 'Worktree management is CLI-only' };
+  }
+
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { createWorktreeHealthChecker } = await import('../core/worktree-health.js');
+    const { input } = await import('@inquirer/prompts');
+    const chalk = (await import('chalk')).default;
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    const session = await sessionManager.resumeSession(ctx.projectPath);
+    const store = sessionManager.getStore();
+    const checker = createWorktreeHealthChecker(ctx.projectPath, store);
+
+    const health = await checker.checkHealth(session.id);
+
+    // Display git worktrees
+    console.log(chalk.cyan('\n  Git Worktrees:\n'));
+    for (const wt of health.gitWorktrees) {
+      const isMain = wt.path === process.cwd() || wt.branch === 'main' || wt.branch === 'master';
+      if (isMain) {
+        console.log(chalk.dim(`  ${wt.branch} (main worktree)`));
+      } else {
+        let status = '';
+        if (wt.locked) status += chalk.red(' [locked]');
+        if (wt.prunable) status += chalk.yellow(' [orphaned]');
+        console.log(`  ${chalk.blue(wt.branch)}${status}`);
+        console.log(chalk.dim(`    Path: ${wt.path}`));
+      }
+    }
+
+    // Display DB entries
+    console.log(chalk.cyan('\n  Database Entries:\n'));
+    for (const wt of health.dbWorktrees) {
+      let statusColor = chalk.white;
+      if (wt.status === 'active') statusColor = chalk.green;
+      if (wt.status === 'merged') statusColor = chalk.blue;
+      if (wt.status === 'abandoned') statusColor = chalk.dim;
+
+      console.log(`  ${wt.branchName} ${statusColor(`(${wt.status})`)}`);
+      console.log(chalk.dim(`    Created: ${wt.createdAt.toLocaleString()}`));
+      if (wt.mergedAt) {
+        console.log(chalk.dim(`    Merged: ${wt.mergedAt.toLocaleString()}`));
+      }
+    }
+
+    console.log();
+    await input({ message: chalk.dim('Press Enter to continue...') });
+
+    sessionManager.close();
+    return { nextStep: 'menu' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to view worktree details';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Full worktree cleanup
+ */
+export const fullWorktreeCleanupAction: ActionHandler<WorktreesFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'error', error: 'Worktree management is CLI-only' };
+  }
+
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { createWorktreeHealthChecker } = await import('../core/worktree-health.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    const session = await sessionManager.resumeSession(ctx.projectPath);
+    const store = sessionManager.getStore();
+    const checker = createWorktreeHealthChecker(ctx.projectPath, store);
+
+    const result = await checker.fullCleanup(session.id);
+    sessionManager.close();
+
+    // Build result message
+    const lines: string[] = ['Full cleanup completed:'];
+    for (const fixed of result.fixed) {
+      lines.push(`  ✓ ${fixed}`);
+    }
+    for (const failed of result.failed) {
+      lines.push(`  ✗ ${failed.issue}: ${failed.error}`);
+    }
+
+    if (result.success) {
+      lines.push('\n✓ Full cleanup complete!');
+    } else {
+      lines.push('\n⚠ Cleanup completed with some errors.');
+    }
+
+    ctx.resultMessage = lines.join('\n');
+    return { nextStep: 'show_result' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to cleanup worktrees';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
+// Secrets Actions
+// ============================================================================
+
+/**
+ * Run secrets interactive CLI
+ */
+export const runSecretsInteractiveAction: ActionHandler<SecretsFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'cli_only' };
+  }
+
+  try {
+    const { interactiveCommand } = await import('../cli/commands/secrets.js');
+    await interactiveCommand({ path: ctx.projectPath ?? process.cwd() });
+    return { nextStep: null };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to run secrets manager';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
+// Projects Actions
+// ============================================================================
+
+/**
+ * Run projects interactive CLI
+ */
+export const runProjectsInteractiveAction: ActionHandler<ProjectsFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'cli_only' };
+  }
+
+  try {
+    const { interactiveCommand } = await import('../cli/commands/projects.js');
+    await interactiveCommand();
+    return { nextStep: null };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to run project registry';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
+// Telegram Settings Actions
+// ============================================================================
+
+/**
+ * Run telegram settings interactive CLI
+ */
+export const runTelegramInteractiveAction: ActionHandler<TelegramSettingsFlowContext> = async (ctx, platform) => {
+  if (platform === 'telegram') {
+    return { nextStep: 'cli_only' };
+  }
+
+  try {
+    const { interactiveCommand } = await import('../cli/commands/telegram.js');
+    await interactiveCommand();
+    return { nextStep: null };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to run telegram settings';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
 // Config Actions
 // ============================================================================
 
@@ -588,10 +926,368 @@ export const removeMcpAction: ActionHandler<ConfigFlowContext> = async (ctx, pla
 };
 
 // ============================================================================
+// Plan Edit Actions
+// ============================================================================
+
+/**
+ * Update a field on a plan requirement
+ */
+export const updateReqFieldAction: ActionHandler<PlanEditContext> = async (ctx) => {
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    // Initialize session
+    await sessionManager.initialize(ctx.projectPath);
+    await sessionManager.resumeSession(ctx.projectPath);
+
+    const store = sessionManager.getStore();
+    const session = sessionManager.getCurrentSession();
+    if (!session) {
+      ctx.error = 'No active session';
+      return { nextStep: 'error' };
+    }
+
+    const plan = store.getActivePlan(session.id);
+    if (!plan) {
+      ctx.error = 'No active plan';
+      return { nextStep: 'error' };
+    }
+
+    const reqIndex = ctx.selectedReqIndex ?? 0;
+    const field = ctx.editField;
+    const value = ctx.editValue;
+
+    if (reqIndex >= plan.requirements.length) {
+      ctx.error = 'Requirement not found';
+      return { nextStep: 'error' };
+    }
+
+    // Clone requirements array and update the field
+    const requirements = [...plan.requirements];
+    const original = requirements[reqIndex];
+
+    if (!original) {
+      ctx.error = 'Requirement not found';
+      return { nextStep: 'error' };
+    }
+
+    const updated = {
+      id: original.id,
+      title: field === 'title' && value ? value : original.title,
+      description: field === 'description' && value ? value : original.description,
+      userStories: original.userStories,
+      acceptanceCriteria: original.acceptanceCriteria,
+      technicalNotes: field === 'notes'
+        ? (value ? value.split('\n').filter(Boolean) : original.technicalNotes)
+        : original.technicalNotes,
+      estimatedComplexity: field === 'complexity' && value
+        ? (value as 'low' | 'medium' | 'high')
+        : original.estimatedComplexity,
+      dependencies: original.dependencies,
+      priority: original.priority,
+      rationale: original.rationale,
+    };
+
+    requirements[reqIndex] = updated;
+    store.updatePlan(plan.id, { requirements });
+
+    // Update context plan
+    ctx.plan = store.getPlan(plan.id);
+
+    // Clear edit state
+    delete ctx.selectedReqIndex;
+    delete ctx.editField;
+    delete ctx.editValue;
+
+    return { nextStep: 'edit_success' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to update requirement';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Reorder a requirement in the plan
+ */
+export const reorderReqAction: ActionHandler<PlanEditContext> = async (ctx) => {
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    await sessionManager.resumeSession(ctx.projectPath);
+
+    const store = sessionManager.getStore();
+    const session = sessionManager.getCurrentSession();
+    if (!session) {
+      ctx.error = 'No active session';
+      return { nextStep: 'error' };
+    }
+
+    const plan = store.getActivePlan(session.id);
+    if (!plan) {
+      ctx.error = 'No active plan';
+      return { nextStep: 'error' };
+    }
+
+    const fromIndex = ctx.reorderFrom ?? 0;
+    const toIndex = ctx.selectedReqIndex ?? 0;
+
+    if (fromIndex >= plan.requirements.length || toIndex >= plan.requirements.length) {
+      ctx.error = 'Invalid position';
+      return { nextStep: 'error' };
+    }
+
+    // Clone and reorder requirements
+    const requirements = [...plan.requirements];
+    const moved = requirements[fromIndex];
+    if (!moved) {
+      ctx.error = 'Source requirement not found';
+      return { nextStep: 'error' };
+    }
+    requirements.splice(fromIndex, 1);
+    requirements.splice(toIndex, 0, moved);
+
+    // Update implementation order too
+    const implementationOrder = requirements.map(r => r.id);
+
+    store.updatePlan(plan.id, { requirements, implementationOrder });
+
+    // Update context plan
+    ctx.plan = store.getPlan(plan.id);
+
+    // Clear reorder state
+    delete ctx.reorderFrom;
+    delete ctx.selectedReqIndex;
+
+    return { nextStep: 'edit_success' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to reorder requirements';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Remove a requirement from the plan
+ */
+export const removeReqAction: ActionHandler<PlanEditContext> = async (ctx) => {
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    await sessionManager.resumeSession(ctx.projectPath);
+
+    const store = sessionManager.getStore();
+    const session = sessionManager.getCurrentSession();
+    if (!session) {
+      ctx.error = 'No active session';
+      return { nextStep: 'error' };
+    }
+
+    const plan = store.getActivePlan(session.id);
+    if (!plan) {
+      ctx.error = 'No active plan';
+      return { nextStep: 'error' };
+    }
+
+    const reqIndex = ctx.selectedReqIndex ?? 0;
+
+    if (reqIndex >= plan.requirements.length) {
+      ctx.error = 'Requirement not found';
+      return { nextStep: 'error' };
+    }
+
+    // Clone and remove requirement
+    const requirements = [...plan.requirements];
+    const toRemove = requirements[reqIndex];
+    if (!toRemove) {
+      ctx.error = 'Requirement not found';
+      return { nextStep: 'error' };
+    }
+    const removedId = toRemove.id;
+    requirements.splice(reqIndex, 1);
+
+    // Update implementation order
+    const implementationOrder = plan.implementationOrder.filter(id => id !== removedId);
+
+    store.updatePlan(plan.id, { requirements, implementationOrder });
+
+    // Update context plan
+    ctx.plan = store.getPlan(plan.id);
+
+    // Clear state
+    delete ctx.selectedReqIndex;
+
+    return { nextStep: 'edit_success' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to remove requirement';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Add a new requirement to the plan
+ */
+export const addPlanReqAction: ActionHandler<PlanEditContext> = async (ctx) => {
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+    const { nanoid } = await import('nanoid');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    await sessionManager.resumeSession(ctx.projectPath);
+
+    const store = sessionManager.getStore();
+    const session = sessionManager.getCurrentSession();
+    if (!session) {
+      ctx.error = 'No active session';
+      return { nextStep: 'error' };
+    }
+
+    const plan = store.getActivePlan(session.id);
+    if (!plan) {
+      ctx.error = 'No active plan';
+      return { nextStep: 'error' };
+    }
+
+    // Get new requirement data from context
+    const newReq = ctx as { _newReqTitle?: string; _newReqDescription?: string; _newReqComplexity?: string };
+    const title = newReq._newReqTitle ?? 'New Requirement';
+    const description = newReq._newReqDescription ?? '';
+    const complexity = (newReq._newReqComplexity ?? 'medium') as 'low' | 'medium' | 'high';
+
+    // Create new requirement
+    const newRequirement = {
+      id: nanoid(8),
+      title,
+      description,
+      userStories: [],
+      acceptanceCriteria: [],
+      technicalNotes: [],
+      estimatedComplexity: complexity,
+      dependencies: [],
+      priority: plan.requirements.length,
+      rationale: '',
+    };
+
+    // Add to requirements array
+    const requirements = [...plan.requirements, newRequirement];
+    const implementationOrder = [...plan.implementationOrder, newRequirement.id];
+
+    store.updatePlan(plan.id, { requirements, implementationOrder });
+
+    // Update context plan
+    ctx.plan = store.getPlan(plan.id);
+
+    // Clear wizard state
+    delete newReq._newReqTitle;
+    delete newReq._newReqDescription;
+    delete newReq._newReqComplexity;
+
+    return { nextStep: 'edit_success' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to add requirement';
+    return { nextStep: 'error' };
+  }
+};
+
+/**
+ * Update an answer to a plan question
+ */
+export const updateQuestionAnswerAction: ActionHandler<PlanEditContext> = async (ctx) => {
+  try {
+    const { sessionManager } = await import('../core/session-manager.js');
+
+    if (!ctx.projectPath) {
+      ctx.error = 'No project path';
+      return { nextStep: 'error' };
+    }
+
+    await sessionManager.initialize(ctx.projectPath);
+    await sessionManager.resumeSession(ctx.projectPath);
+
+    const store = sessionManager.getStore();
+    const session = sessionManager.getCurrentSession();
+    if (!session) {
+      ctx.error = 'No active session';
+      return { nextStep: 'error' };
+    }
+
+    const plan = store.getActivePlan(session.id);
+    if (!plan) {
+      ctx.error = 'No active plan';
+      return { nextStep: 'error' };
+    }
+
+    const questionIndex = ctx.selectedQuestionIndex ?? 0;
+    const answer = ctx.editValue;
+
+    if (questionIndex >= plan.questions.length) {
+      ctx.error = 'Question not found';
+      return { nextStep: 'error' };
+    }
+
+    // Clone questions array and update answer
+    const questions = [...plan.questions];
+    const original = questions[questionIndex];
+    if (!original) {
+      ctx.error = 'Question not found';
+      return { nextStep: 'error' };
+    }
+
+    // Build updated question with explicit property assignment
+    const updatedQuestion: typeof original = {
+      id: original.id,
+      category: original.category,
+      question: original.question,
+      context: original.context,
+      answer: answer ?? '',
+      answeredAt: new Date(),
+    };
+    if (original.suggestedOptions) {
+      updatedQuestion.suggestedOptions = original.suggestedOptions;
+    }
+    questions[questionIndex] = updatedQuestion;
+
+    store.updatePlan(plan.id, { questions });
+
+    // Update context plan
+    ctx.plan = store.getPlan(plan.id);
+
+    // Clear edit state
+    delete ctx.selectedQuestionIndex;
+    delete ctx.editValue;
+
+    return { nextStep: 'edit_success' };
+  } catch (error) {
+    ctx.error = error instanceof Error ? error.message : 'Failed to update answer';
+    return { nextStep: 'error' };
+  }
+};
+
+// ============================================================================
 // Action Registry
 // ============================================================================
 
-type AnyContext = DaemonFlowContext | RunFlowContext | RequirementsFlowContext | PlanFlowContext | ConfigFlowContext;
+type AnyContext = DaemonFlowContext | RunFlowContext | RequirementsFlowContext | PlanFlowContext | PlanEditContext | ConfigFlowContext | WorktreesFlowContext | SecretsFlowContext | ProjectsFlowContext | TelegramSettingsFlowContext;
 
 const actionRegistry: Record<string, ActionHandler<AnyContext>> = {
   // Daemon actions
@@ -622,6 +1318,31 @@ const actionRegistry: Record<string, ActionHandler<AnyContext>> = {
   add_mcp: addMcpAction as ActionHandler<AnyContext>,
   toggle_mcp: toggleMcpAction as ActionHandler<AnyContext>,
   remove_mcp: removeMcpAction as ActionHandler<AnyContext>,
+
+  // Init actions
+  init_project: initProjectAction as ActionHandler<AnyContext>,
+
+  // Plan edit actions
+  update_req_field: updateReqFieldAction as ActionHandler<AnyContext>,
+  reorder_req: reorderReqAction as ActionHandler<AnyContext>,
+  remove_req: removeReqAction as ActionHandler<AnyContext>,
+  add_plan_req: addPlanReqAction as ActionHandler<AnyContext>,
+  update_question_answer: updateQuestionAnswerAction as ActionHandler<AnyContext>,
+
+  // Worktree actions
+  check_worktree_health: checkWorktreeHealthAction as ActionHandler<AnyContext>,
+  repair_worktrees: repairWorktreesAction as ActionHandler<AnyContext>,
+  view_worktree_details: viewWorktreeDetailsAction as ActionHandler<AnyContext>,
+  full_worktree_cleanup: fullWorktreeCleanupAction as ActionHandler<AnyContext>,
+
+  // Secrets actions
+  run_secrets_interactive: runSecretsInteractiveAction as ActionHandler<AnyContext>,
+
+  // Projects actions
+  run_projects_interactive: runProjectsInteractiveAction as ActionHandler<AnyContext>,
+
+  // Telegram settings actions
+  run_telegram_interactive: runTelegramInteractiveAction as ActionHandler<AnyContext>,
 };
 
 /**

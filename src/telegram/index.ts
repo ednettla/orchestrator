@@ -6,7 +6,7 @@
  * @module telegram
  */
 
-export { startBot, stopBot, getWebAppServer } from './bot.js';
+export { startBot, stopBot } from './bot.js';
 export * from './types.js';
 export * from './keyboards.js';
 export * from './security.js';

@@ -10,7 +10,7 @@ import { registerCommand } from '../router.js';
 import type { CommandDefinition } from '../types.js';
 
 // Import individual handlers
-import { startHandler, helpHandler, webappHandler } from './start.js';
+import { startHandler, helpHandler } from './start.js';
 import { projectsHandler, switchHandler, newProjectHandler } from './project.js';
 import { planHandler, approveHandler, rejectHandler, answerHandler, questionsHandler } from './plan.js';
 import { runHandler, stopHandler, resumeHandler, refreshHandler } from './run.js';
@@ -55,14 +55,6 @@ const commandDefinitions: CommandDefinition[] = [
     description: 'Open interactive menu',
     usage: '/menu',
     handler: menuHandler,
-    requiredRole: 'viewer',
-    projectScoped: false,
-  },
-  {
-    name: 'webapp',
-    description: 'Open the Mini App',
-    usage: '/webapp',
-    handler: webappHandler,
     requiredRole: 'viewer',
     projectScoped: false,
   },

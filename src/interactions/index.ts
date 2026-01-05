@@ -79,7 +79,31 @@ export type { RunFlowContext, RunMode } from './flows/run.js';
 export { requirementsFlow, isRequirementsAction, getRequirementsAction } from './flows/requirements.js';
 export type { RequirementsFlowContext } from './flows/requirements.js';
 
+export { planMenuFlow, planWizardFlow, isPlanAction, getPlanAction } from './flows/plan.js';
+export type { PlanFlowContext } from './flows/plan.js';
+
+export { planEditReqsFlow, planEditQuestionsFlow } from './flows/plan-edit.js';
+export type { PlanEditContext } from './flows/plan-edit.js';
+
+export { configFlow, mcpFlow, isConfigAction, getConfigAction } from './flows/config.js';
+export type { ConfigFlowContext } from './flows/config.js';
+
+export { initFlow, isInitAction, getInitAction } from './flows/init.js';
+export type { InitFlowContext } from './flows/init.js';
+
 export { flowRegistry, getFlow } from './flows/index.js';
+
+export { worktreesFlow, isWorktreesAction, getWorktreesAction } from './flows/worktrees.js';
+export type { WorktreesFlowContext, WorktreeHealth } from './flows/worktrees.js';
+
+export { secretsFlow, isSecretsAction, getSecretsAction } from './flows/secrets.js';
+export type { SecretsFlowContext } from './flows/secrets.js';
+
+export { projectsFlow, isProjectsAction, getProjectsAction } from './flows/projects.js';
+export type { ProjectsFlowContext } from './flows/projects.js';
+
+export { telegramSettingsFlow, isTelegramSettingsAction, getTelegramSettingsAction } from './flows/telegram-settings.js';
+export type { TelegramSettingsFlowContext } from './flows/telegram-settings.js';
 
 // Action Handlers
 export {
