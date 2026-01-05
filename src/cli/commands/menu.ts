@@ -202,20 +202,35 @@ async function runUnifiedSubFlow(
       const nestedFlowId = getSubFlowId(currentStepId);
       const ctx = subRunner.getContext();
 
-      // Handle nested sub-flow
-      switch (nestedFlowId) {
-        case 'run':
-          await runUnifiedSubFlow(runFlow, ctx as RunFlowContext, projectPath);
-          break;
-        case 'mcp':
-          await runUnifiedSubFlow(mcpFlow, ctx as ConfigFlowContext, projectPath);
-          break;
-        case 'plan':
-          await runUnifiedSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath);
-          break;
-        case 'worktrees':
-          await runUnifiedSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath);
-          break;
+      // Handle nested sub-flow with error handling
+      try {
+        switch (nestedFlowId) {
+          case 'run':
+            await runUnifiedSubFlow(runFlow, ctx as RunFlowContext, projectPath);
+            break;
+          case 'mcp':
+            await runUnifiedSubFlow(mcpFlow, ctx as ConfigFlowContext, projectPath);
+            break;
+          case 'plan':
+            await runUnifiedSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath);
+            break;
+          case 'plan-edit-reqs':
+            await runUnifiedSubFlow(planEditReqsFlow, ctx as PlanEditContext, projectPath);
+            break;
+          case 'plan-edit-questions':
+            await runUnifiedSubFlow(planEditQuestionsFlow, ctx as PlanEditContext, projectPath);
+            break;
+          case 'worktrees':
+            await runUnifiedSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath);
+            break;
+          default:
+            console.warn(chalk.yellow(`Unknown nested flow: ${nestedFlowId}`));
+            break;
+        }
+      } catch (error) {
+        // Display error and continue to menu
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        console.error(chalk.red(`\nError in nested flow: ${errorMessage}\n`));
       }
 
       // After nested flow, refresh and go back to this flow's menu

@@ -7,7 +7,7 @@
  * @module ui/hooks/useAppState
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type {
   SelectInteraction,
   InputInteraction,
@@ -104,6 +104,9 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
     exiting: false,
   });
 
+  // Track progress timeout for cleanup
+  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showMenu = useCallback((interaction: SelectInteraction): Promise<string | null> => {
     return new Promise((resolve) => {
       setState((prev) => ({
@@ -132,6 +135,12 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
   }, []);
 
   const showProgress = useCallback((interaction: ProgressInteraction) => {
+    // Clear any existing timeout from previous progress
+    if (progressTimeoutRef.current) {
+      clearTimeout(progressTimeoutRef.current);
+      progressTimeoutRef.current = null;
+    }
+
     setState((prev) => ({
       ...prev,
       view: { type: 'progress', message: interaction.message, state: 'spinning' },
@@ -147,6 +156,11 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
         });
       },
       succeed: (message?: string) => {
+        // Clear any existing timeout
+        if (progressTimeoutRef.current) {
+          clearTimeout(progressTimeoutRef.current);
+        }
+
         setState((prev) => {
           if (prev.view.type === 'progress') {
             return {
@@ -156,8 +170,9 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
           }
           return prev;
         });
-        // Auto-clear after a short delay
-        setTimeout(() => {
+        // Auto-clear after a short delay (tracked for cleanup)
+        progressTimeoutRef.current = setTimeout(() => {
+          progressTimeoutRef.current = null;
           setState((prev) => {
             if (prev.view.type === 'progress' && prev.view.state === 'success') {
               return { ...prev, view: { type: 'idle' } };
@@ -167,6 +182,12 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
         }, 500);
       },
       fail: (message?: string) => {
+        // Clear any existing timeout
+        if (progressTimeoutRef.current) {
+          clearTimeout(progressTimeoutRef.current);
+          progressTimeoutRef.current = null;
+        }
+
         setState((prev) => {
           if (prev.view.type === 'progress') {
             return {
@@ -178,6 +199,12 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
         });
       },
       stop: () => {
+        // Clear any existing timeout
+        if (progressTimeoutRef.current) {
+          clearTimeout(progressTimeoutRef.current);
+          progressTimeoutRef.current = null;
+        }
+
         setState((prev) => {
           if (prev.view.type === 'progress') {
             return { ...prev, view: { type: 'idle' } };

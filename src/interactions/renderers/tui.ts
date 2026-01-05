@@ -98,6 +98,16 @@ export async function createTuiRenderer(
     // Timeout after 5 seconds if React component doesn't initialize
     const timeout = setTimeout(() => {
       readyResolver = null;
+      // Clean up the instance on timeout to exit alternate buffer
+      if (tuiState.instance) {
+        try {
+          tuiState.instance.instance.unmount();
+        } catch {
+          // Ignore unmount errors during timeout cleanup
+        }
+        tuiState.instance = null;
+      }
+      tuiState.actions = null;
       reject(new Error('TUI initialization timed out - React component failed to mount'));
     }, 5000);
 
