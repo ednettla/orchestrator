@@ -504,6 +504,9 @@ async function createProjectFromWizard(
     const registry = getProjectRegistry();
     registry.registerProject({ path: projectPath, name: state.projectName });
 
+    // Create .orchestrator directory for project store
+    mkdirSync(path.join(projectPath, '.orchestrator'), { recursive: true });
+
     // Initialize session in project store
     const projectStore = createStore(projectPath);
     const techStack = buildTechStackFromWizard(state);
