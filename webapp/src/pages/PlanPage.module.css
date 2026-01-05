@@ -310,8 +310,30 @@
 .modalDescription {
   font-size: var(--font-size-sm);
   color: var(--hint-color);
-  margin: 0 0 var(--spacing-lg);
+  margin: 0 0 var(--spacing-md);
   line-height: 1.5;
+}
+
+.goalInput {
+  width: 100%;
+  background: var(--bg-color);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-sm);
+  padding: var(--spacing-sm);
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  resize: vertical;
+  margin-bottom: var(--spacing-md);
+}
+
+.goalInput:focus {
+  outline: none;
+  border-color: var(--button-color);
+}
+
+.goalInput::placeholder {
+  color: var(--hint-color);
 }
 
 .modalActions {

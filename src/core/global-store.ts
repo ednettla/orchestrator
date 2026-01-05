@@ -661,6 +661,27 @@ export class GlobalStore {
   }
 
   // ==========================================================================
+  // Projects Directory Configuration
+  // ==========================================================================
+
+  /**
+   * Get the default projects directory for new project creation
+   * Defaults to ~/Projects if not configured
+   */
+  getProjectsDirectory(): string {
+    const stmt = this.db.prepare(`SELECT value FROM telegram_config WHERE key = 'projects_directory'`);
+    const row = stmt.get() as { value: string } | undefined;
+    return row?.value ?? path.join(os.homedir(), 'Projects');
+  }
+
+  /**
+   * Set the default projects directory for new project creation
+   */
+  setProjectsDirectory(directory: string): void {
+    this.setConfigValue('projects_directory', directory);
+  }
+
+  // ==========================================================================
   // Auth Sources
   // ==========================================================================
 

@@ -57,6 +57,7 @@ export default function PlanPage() {
       }
       return response.data!;
     },
+    enabled: !!projectId,
   });
 
   const answerMutation = useMutation({
@@ -103,8 +104,8 @@ export default function PlanPage() {
   });
 
   const startPlanMutation = useMutation({
-    mutationFn: async () => {
-      const response = await api.post(`/projects/${projectId}/plans`);
+    mutationFn: async (goal: string) => {
+      const response = await api.post(`/projects/${projectId}/plans`, { goal });
       if (!response.success) {
         throw new Error(response.error?.message ?? 'Failed to start plan');
       }
@@ -118,7 +119,9 @@ export default function PlanPage() {
   });
 
   const handleStartPlan = () => {
-    startPlanMutation.mutate();
+    if (goalText.trim()) {
+      startPlanMutation.mutate(goalText.trim());
+    }
   };
 
   const handleAnswer = (question: Question) => {
@@ -176,22 +179,32 @@ export default function PlanPage() {
             <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
               <h3 className={styles.modalTitle}>Start Autonomous Planning</h3>
               <p className={styles.modalDescription}>
-                The AI will analyze your project, ask clarifying questions, and generate
-                a detailed plan with requirements.
+                Describe what you want to build. The AI will analyze your project,
+                ask clarifying questions, and generate a detailed plan.
               </p>
+              <textarea
+                className={styles.goalInput}
+                placeholder="What do you want to build?"
+                value={goalText}
+                onChange={(e) => setGoalText(e.target.value)}
+                rows={4}
+              />
               <div className={styles.modalActions}>
                 <button
                   className={styles.modalCancel}
-                  onClick={() => setShowStartModal(false)}
+                  onClick={() => {
+                    setShowStartModal(false);
+                    setGoalText('');
+                  }}
                 >
                   Cancel
                 </button>
                 <button
                   className={styles.modalSubmit}
                   onClick={handleStartPlan}
-                  disabled={startPlanMutation.isPending}
+                  disabled={startPlanMutation.isPending || !goalText.trim()}
                 >
-                  {startPlanMutation.isPending ? 'Starting...' : 'Start'}
+                  {startPlanMutation.isPending ? 'Starting...' : 'Start Planning'}
                 </button>
               </div>
             </div>

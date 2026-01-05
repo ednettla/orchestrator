@@ -177,6 +177,15 @@ export function createPlansRouter(): Router {
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const projectId = req.params.projectId as string;
+        const { goal } = req.body as { goal?: string };
+
+        if (!goal?.trim()) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'MISSING_GOAL', message: 'Goal is required to start planning' },
+          });
+          return;
+        }
 
         const registry = getProjectRegistry();
         const project = registry.getProjectById(projectId) ?? registry.getProject(projectId);
@@ -192,7 +201,7 @@ export function createPlansRouter(): Router {
         // Import plan functionality
         const { startPlanFromApi } = await import('../../project-bridge.js');
 
-        const result = await startPlanFromApi(project.path);
+        const result = await startPlanFromApi(project.path, goal.trim());
 
         if (!result.success) {
           res.status(400).json({

@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectStatus, ProjectPhase, RequirementsSummary } from './types.js';
 
@@ -600,6 +601,41 @@ export async function initProjectFromApi(options: {
 }
 
 /**
+ * Create a new project with just a name (for WebApp API)
+ * Creates directory in the configured projects directory and initializes
+ */
+export async function createProjectSimple(name: string): Promise<ApiResult> {
+  try {
+    const { getGlobalStore } = await import('../core/global-store.js');
+    const store = getGlobalStore();
+    const projectsDir = store.getProjectsDirectory();
+    const projectPath = path.join(projectsDir, name);
+
+    // Ensure projects directory exists
+    await fs.mkdir(projectsDir, { recursive: true });
+
+    // Check if project directory already exists
+    try {
+      await fs.access(projectPath);
+      return { success: false, error: `Project "${name}" already exists` };
+    } catch {
+      // Directory doesn't exist, which is what we want
+    }
+
+    // Create the project directory
+    await fs.mkdir(projectPath, { recursive: true });
+
+    // Initialize the project
+    return initProjectFromApi({ path: projectPath, name });
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
  * Run a single requirement (for WebApp API)
  */
 export async function runRequirementFromApi(
@@ -632,9 +668,10 @@ export async function runRequirementFromApi(
 /**
  * Start planning process (for WebApp API)
  */
-export async function startPlanFromApi(projectPath: string): Promise<ApiResult> {
+export async function startPlanFromApi(projectPath: string, goal: string): Promise<ApiResult> {
   try {
-    const result = await executeCommand(projectPath, 'plan', ['--background']);
+    // Pass goal as the first argument, then --background flag
+    const result = await executeCommand(projectPath, 'plan', [goal, '--background']);
 
     if (!result.success) {
       return { success: false, error: result.error ?? result.output };

@@ -185,6 +185,64 @@ export function createProjectsRouter(): Router {
   );
 
   // --------------------------------------------------------------------------
+  // Create Project (Simple - just name)
+  // --------------------------------------------------------------------------
+
+  router.post(
+    '/create',
+    requireRole('admin'),
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { name } = req.body as { name?: string };
+
+        if (!name?.trim()) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'MISSING_NAME', message: 'Project name is required' },
+          });
+          return;
+        }
+
+        // Validate project name (alphanumeric, hyphens, underscores)
+        const validName = /^[a-zA-Z0-9_-]+$/.test(name);
+        if (!validName) {
+          res.status(400).json({
+            success: false,
+            error: {
+              code: 'INVALID_NAME',
+              message: 'Project name can only contain letters, numbers, hyphens, and underscores',
+            },
+          });
+          return;
+        }
+
+        // Import and execute simple project creation
+        const { createProjectSimple } = await import('../../project-bridge.js');
+        const result = await createProjectSimple(name.trim());
+
+        if (!result.success) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'CREATE_FAILED', message: result.error ?? 'Failed to create project' },
+          });
+          return;
+        }
+
+        res.json({
+          success: true,
+          project: result.project,
+        });
+      } catch (error) {
+        console.error('[API] Error creating project:', error);
+        res.status(500).json({
+          success: false,
+          error: { code: 'INTERNAL_ERROR', message: 'Failed to create project' },
+        });
+      }
+    }
+  );
+
+  // --------------------------------------------------------------------------
   // Update Project
   // --------------------------------------------------------------------------
 
