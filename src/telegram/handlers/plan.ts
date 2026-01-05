@@ -8,9 +8,7 @@
 
 import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
-import { planConfirmKeyboard } from '../keyboards.js';
 import {
-  startPlan,
   approvePlanFromApi,
   rejectPlanFromApi,
   answerPlanQuestionFromApi,

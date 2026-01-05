@@ -10,7 +10,7 @@
 import { Bot } from 'grammy';
 import { getGlobalStore } from '../core/global-store.js';
 import { createWebAppServer, type WebAppServer } from './webapp/server.js';
-import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers, getHelpText } from './handlers/index.js';
+import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers } from './handlers/index.js';
 import { routeCommand } from './router.js';
 import { handleWizardTextInput } from './flows/project-wizard.js';
 import { handlePlanWizardTextInput } from './flows/plan-wizard.js';

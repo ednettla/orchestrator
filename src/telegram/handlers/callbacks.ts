@@ -28,7 +28,6 @@ import {
 } from '../project-bridge.js';
 import {
   projectActionsKeyboard,
-  planApprovalKeyboard,
   requirementsListKeyboard,
   requirementActionsKeyboard,
   logsNavigationKeyboard,

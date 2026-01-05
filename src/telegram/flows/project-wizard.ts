@@ -22,7 +22,6 @@ import {
   createInitialWizardState,
   getNextStep,
   getPreviousStep,
-  getTechCategoryFromStep,
 } from './types.js';
 import {
   buildStepKeyboard,

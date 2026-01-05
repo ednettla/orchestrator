@@ -7,7 +7,6 @@
  */
 
 import type { Context } from 'grammy';
-import type { InlineKeyboard } from 'grammy';
 import { getGlobalStore } from '../../core/global-store.js';
 import { getAllowedPathsManager } from '../../core/allowed-paths.js';
 import { getProjectRegistry } from '../../core/project-registry.js';

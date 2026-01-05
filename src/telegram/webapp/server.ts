@@ -13,17 +13,12 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
-import { getGlobalStore } from '../../core/global-store.js';
 import {
   authenticateJWT,
   authenticateFromInitData,
-  type AuthenticatedRequest,
   type JWTPayload,
 } from './middleware/auth.js';
 import { createProjectsRouter } from './routes/projects.js';
-import { createRequirementsRouter } from './routes/requirements.js';
-import { createPlansRouter } from './routes/plans.js';
-import { createDashboardRouter } from './routes/dashboard.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 

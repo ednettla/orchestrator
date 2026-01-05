@@ -10,7 +10,7 @@ import { Router, type Response } from 'express';
 import { type AuthenticatedRequest } from '../middleware/auth.js';
 import { getProjectRegistry } from '../../../core/project-registry.js';
 import { createStore } from '../../../state/store.js';
-import type { Requirement, Task, ClarifyingQuestion } from '../../../core/types.js';
+import type { Requirement, ClarifyingQuestion } from '../../../core/types.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 

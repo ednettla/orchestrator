@@ -10,7 +10,6 @@ import { InlineKeyboard } from 'grammy';
 import {
   type ProjectWizardState,
   type TechCategory,
-  type WizardStep,
   TECH_STACK_OPTIONS,
   TECH_CATEGORY_LABELS,
   CLOUD_SERVICES,
