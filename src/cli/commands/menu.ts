@@ -1668,10 +1668,12 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
     // Handle response
     const result = await runner.handleResponse(response);
 
-    // Check for sub-flow navigation (fall back to old handlers)
-    const ctx = runner.getContext() as MainMenuContext;
-    if (ctx.selectedAction?.startsWith('flow:')) {
-      const subFlowId = getSubFlowId(ctx.selectedAction);
+    // Check for sub-flow navigation - step handler returns 'flow:xyz'
+    // which FlowRunner sets as currentStepId
+    const currentStepId = runner.getCurrentStepId();
+    if (currentStepId.startsWith('flow:')) {
+      const subFlowId = getSubFlowId(currentStepId);
+      const ctx = runner.getContext() as MainMenuContext;
       await refreshContext(oldContext);
 
       // Route to unified flows or existing handlers
@@ -1709,7 +1711,8 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
           break;
       }
 
-      // Refresh flow context after handler
+      // Navigate back to menu and refresh context
+      runner.navigateTo('menu');
       const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
       runner.updateContext({ ...refreshed } as MainMenuContext);
       continue;
