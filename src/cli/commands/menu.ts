@@ -29,6 +29,19 @@ import { interactiveCommand as secretsInteractive } from './secrets.js';
 import { interactiveCommand as projectsInteractive } from './projects.js';
 import { interactiveCommand as telegramInteractive } from './telegram.js';
 
+// Unified Interactions System
+import {
+  FlowRunner,
+  cliRenderer,
+  buildFlowContext,
+  createCliUser,
+  mainMenuFlow,
+  getSubFlowId,
+  printBanner as flowPrintBanner,
+  printContextInfo as flowPrintContextInfo,
+} from '../../interactions/index.js';
+import type { MainMenuContext } from '../../interactions/index.js';
+
 interface MenuContext {
   hasProject: boolean;
   projectName?: string;
@@ -1497,95 +1510,116 @@ async function runInitFlow(context: MenuContext): Promise<void> {
 export async function mainMenuCommand(options: { path: string }): Promise<void> {
   const projectPath = path.resolve(options.path);
 
-  printBanner();
+  // Use new unified flow system
+  flowPrintBanner();
 
-  const context = await getMenuContext(projectPath);
-  printContextInfo(context);
+  // Build flow context
+  const baseContext = await buildFlowContext(projectPath, createCliUser(), 'cli');
+  const flowContext: MainMenuContext = { ...baseContext };
 
+  // Print context info
+  const contextInfo: Parameters<typeof flowPrintContextInfo>[0] = {
+    hasProject: flowContext.hasProject,
+    requirements: flowContext.requirements,
+    daemon: flowContext.daemon,
+  };
+  if (flowContext.projectName !== undefined) {
+    contextInfo.projectName = flowContext.projectName;
+  }
+  if (flowContext.plan) {
+    contextInfo.plan = {
+      status: flowContext.plan.status,
+      highLevelGoal: flowContext.plan.highLevelGoal,
+    };
+  }
+  flowPrintContextInfo(contextInfo);
+
+  // Also get old context for existing handlers
+  const oldContext = await getMenuContext(projectPath);
+
+  // Create flow runner
+  const runner = new FlowRunner(mainMenuFlow, cliRenderer, flowContext);
+
+  // Run flow loop
   while (true) {
-    // Refresh context each loop iteration
-    await refreshContext(context);
+    const response = await runner.runCurrentStep();
 
-    const choices = buildMainMenuChoices(context);
+    // Handle cancellation
+    if (response === null) {
+      const step = runner.getCurrentStep();
+      const interaction = step?.interaction(runner.getContext());
 
-    const action = await select({
-      message: 'What would you like to do?',
-      choices: choices.map((c) => ({
-        name: c.description ? `${c.name}  ${chalk.dim(c.description)}` : c.name,
-        value: c.value,
-      })),
-    });
-
-    console.log();
-
-    switch (action) {
-      case 'init':
-        await runInitFlow(context);
-        break;
-
-      case 'plan':
-        await showPlanMenu(context);
-        break;
-
-      case 'run':
-        await showRunMenu(context);
-        break;
-
-      case 'status':
-        await statusCommand({ path: projectPath, json: false });
-        console.log();
-        await input({ message: chalk.dim('Press Enter to continue...') });
-        break;
-
-      case 'requirements':
-        await showRequirementsMenu(context);
-        break;
-
-      case 'daemon':
-        await showDaemonMenu(context);
-        break;
-
-      case 'config':
-        await showConfigMenu(context);
-        break;
-
-      case 'secrets':
-        await secretsInteractive({ path: context.projectPath });
-        break;
-
-      case 'projects':
-        await projectsInteractive();
-        break;
-
-      case 'telegram':
-        await telegramInteractive();
-        break;
-
-      case 'update': {
-        console.log(chalk.cyan('Checking for updates...\n'));
-        const info = await checkForUpdates();
-        if (info.isOutdated) {
-          console.log(chalk.yellow(`Updates available: ${info.commitsBehind} commits behind`));
-          console.log(chalk.dim(`  Current: ${info.current}`));
-          console.log(chalk.dim(`  Latest:  ${info.latest}\n`));
-
-          const doUpdate = await confirm({ message: 'Update now?', default: true });
-
-          if (doUpdate) {
-            await updateToLatest();
-            console.log(chalk.dim('\nRestart orchestrate to use the new version.\n'));
-            return;
-          }
-        } else {
-          console.log(chalk.green('✓ Already up to date!'));
-          console.log(chalk.dim(`  Version: ${info.current}\n`));
-        }
-        break;
+      if (interaction?.type === 'display') {
+        const result = await runner.handleResponse(null);
+        if (result.done) break;
+        continue;
       }
 
-      case 'exit':
-        console.log(chalk.dim('Goodbye!\n'));
-        return;
+      // User cancelled
+      console.log(chalk.dim('\nGoodbye!\n'));
+      break;
+    }
+
+    // Handle progress interaction
+    if (response && typeof response === 'object' && 'update' in response) {
+      const result = await runner.handleResponse(response);
+      if (result.done) break;
+      continue;
+    }
+
+    // Handle response
+    const result = await runner.handleResponse(response);
+
+    // Check for sub-flow navigation (fall back to old handlers)
+    const ctx = runner.getContext() as MainMenuContext;
+    if (ctx.selectedAction?.startsWith('flow:')) {
+      const subFlowId = getSubFlowId(ctx.selectedAction);
+      await refreshContext(oldContext);
+
+      // Route to existing handlers
+      switch (subFlowId) {
+        case 'init':
+          await runInitFlow(oldContext);
+          break;
+        case 'plan':
+          await showPlanMenu(oldContext);
+          break;
+        case 'run':
+          await showRunMenu(oldContext);
+          break;
+        case 'requirements':
+          await showRequirementsMenu(oldContext);
+          break;
+        case 'daemon':
+          await showDaemonMenu(oldContext);
+          break;
+        case 'config':
+          await showConfigMenu(oldContext);
+          break;
+        case 'secrets':
+          await secretsInteractive({ path: oldContext.projectPath });
+          break;
+        case 'projects':
+          await projectsInteractive();
+          break;
+        case 'telegram':
+          await telegramInteractive();
+          break;
+      }
+
+      // Refresh flow context after handler
+      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+      runner.updateContext({ ...refreshed } as MainMenuContext);
+      continue;
+    }
+
+    if (result.done) {
+      console.log(chalk.dim('\nGoodbye!\n'));
+      break;
+    }
+
+    if (result.error) {
+      console.error(chalk.red(`\nError: ${result.error}\n`));
     }
   }
 }
