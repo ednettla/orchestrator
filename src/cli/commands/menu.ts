@@ -39,8 +39,18 @@ import {
   getSubFlowId,
   printBanner as flowPrintBanner,
   printContextInfo as flowPrintContextInfo,
+  // Unified flows
+  daemonFlow,
+  runFlow,
+  requirementsFlow,
+  // Action handling
+  executeAction,
+  isActionMarker,
+  getActionName,
+  // Flow registry
+  getFlow,
 } from '../../interactions/index.js';
-import type { MainMenuContext } from '../../interactions/index.js';
+import type { MainMenuContext, DaemonFlowContext, RunFlowContext, RequirementsFlowContext } from '../../interactions/index.js';
 
 interface MenuContext {
   hasProject: boolean;
@@ -1504,6 +1514,89 @@ async function runInitFlow(context: MenuContext): Promise<void> {
 }
 
 // ============================================================================
+// Unified Flow Runner Helper
+// ============================================================================
+
+/**
+ * Run a unified sub-flow with action handling
+ *
+ * @param flow - The flow definition to run
+ * @param baseContext - The current context to pass to the flow
+ * @param projectPath - The project path for refreshing context
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runUnifiedSubFlow(
+  flow: any,
+  baseContext: MainMenuContext,
+  projectPath: string
+): Promise<void> {
+  // Create a new runner with the sub-flow
+  const subRunner = new FlowRunner(
+    flow,
+    cliRenderer,
+    baseContext
+  );
+
+  while (true) {
+    const response = await subRunner.runCurrentStep();
+
+    // Handle cancellation
+    if (response === null) {
+      const step = subRunner.getCurrentStep();
+      const interaction = step?.interaction(subRunner.getContext());
+
+      if (interaction?.type === 'display') {
+        const result = await subRunner.handleResponse(null);
+        if (result.done) break;
+        continue;
+      }
+
+      // User cancelled - return to main menu
+      break;
+    }
+
+    // Handle progress interaction
+    if (response && typeof response === 'object' && 'update' in response) {
+      const result = await subRunner.handleResponse(response);
+      if (result.done) break;
+      continue;
+    }
+
+    // Handle response
+    const result = await subRunner.handleResponse(response);
+    const ctx = subRunner.getContext();
+
+    // Check for action markers
+    if (ctx.selectedAction && isActionMarker(ctx.selectedAction)) {
+      const actionName = getActionName(ctx.selectedAction);
+      const actionResult = await executeAction(actionName, ctx, 'cli');
+
+      if (actionResult.error) {
+        console.error(chalk.red(`\nError: ${actionResult.error}\n`));
+      }
+
+      // Navigate to the step returned by the action
+      if (actionResult.nextStep) {
+        subRunner.navigateTo(actionResult.nextStep);
+      }
+
+      // Refresh context after action
+      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+      subRunner.updateContext({ ...refreshed, ...ctx });
+      continue;
+    }
+
+    if (result.done) {
+      break;
+    }
+
+    if (result.error) {
+      console.error(chalk.red(`\nError: ${result.error}\n`));
+    }
+  }
+}
+
+// ============================================================================
 // Main Menu
 // ============================================================================
 
@@ -1576,22 +1669,26 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
       const subFlowId = getSubFlowId(ctx.selectedAction);
       await refreshContext(oldContext);
 
-      // Route to existing handlers
+      // Route to unified flows or existing handlers
       switch (subFlowId) {
         case 'init':
           await runInitFlow(oldContext);
           break;
         case 'plan':
+          // Plan still uses old handler (complex wizard with many states)
           await showPlanMenu(oldContext);
           break;
         case 'run':
-          await showRunMenu(oldContext);
+          // Use unified run flow
+          await runUnifiedSubFlow(runFlow, ctx as RunFlowContext, projectPath);
           break;
         case 'requirements':
-          await showRequirementsMenu(oldContext);
+          // Use unified requirements flow
+          await runUnifiedSubFlow(requirementsFlow, ctx as RequirementsFlowContext, projectPath);
           break;
         case 'daemon':
-          await showDaemonMenu(oldContext);
+          // Use unified daemon flow
+          await runUnifiedSubFlow(daemonFlow, ctx as DaemonFlowContext, projectPath);
           break;
         case 'config':
           await showConfigMenu(oldContext);

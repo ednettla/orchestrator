@@ -69,3 +69,22 @@ export {
 // Flows
 export { mainMenuFlow, getSubFlowId } from './flows/main-menu.js';
 export type { MainMenuContext } from './flows/main-menu.js';
+
+export { daemonFlow, isDaemonAction, getDaemonAction } from './flows/daemon.js';
+export type { DaemonFlowContext } from './flows/daemon.js';
+
+export { runFlow, isRunAction, getRunAction } from './flows/run.js';
+export type { RunFlowContext, RunMode } from './flows/run.js';
+
+export { requirementsFlow, isRequirementsAction, getRequirementsAction } from './flows/requirements.js';
+export type { RequirementsFlowContext } from './flows/requirements.js';
+
+export { flowRegistry, getFlow } from './flows/index.js';
+
+// Action Handlers
+export {
+  executeAction,
+  isActionMarker,
+  getActionName,
+} from './action-handlers.js';
+export type { ActionResult, ActionHandler } from './action-handlers.js';

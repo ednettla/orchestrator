@@ -40,6 +40,14 @@ export {
 } from './config.js';
 export type { ConfigFlowContext } from './config.js';
 
+// Daemon
+export {
+  daemonFlow,
+  isDaemonAction,
+  getDaemonAction,
+} from './daemon.js';
+export type { DaemonFlowContext } from './daemon.js';
+
 /**
  * Flow registry - maps flow IDs to flow definitions
  */
@@ -48,6 +56,7 @@ import { planMenuFlow, planWizardFlow } from './plan.js';
 import { runFlow } from './run.js';
 import { requirementsFlow } from './requirements.js';
 import { configFlow, mcpFlow } from './config.js';
+import { daemonFlow } from './daemon.js';
 import type { Flow, FlowContext } from '../types.js';
 
 export const flowRegistry: Record<string, Flow<FlowContext>> = {
@@ -59,6 +68,7 @@ export const flowRegistry: Record<string, Flow<FlowContext>> = {
   'requirements': requirementsFlow as Flow<FlowContext>,
   'config': configFlow as Flow<FlowContext>,
   'mcp': mcpFlow as Flow<FlowContext>,
+  'daemon': daemonFlow as Flow<FlowContext>,
 };
 
 /**

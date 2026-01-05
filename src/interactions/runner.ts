@@ -203,6 +203,16 @@ export class FlowRunner<TContext extends FlowContext = FlowContext> {
   }
 
   /**
+   * Navigate directly to a specific step
+   */
+  navigateTo(stepId: string): void {
+    if (this.flow.steps[stepId]) {
+      this.stepHistory.push(this.currentStepId);
+      this.currentStepId = stepId;
+    }
+  }
+
+  /**
    * Render an interaction using the renderer
    */
   private async renderInteraction(interaction: Interaction): Promise<unknown> {

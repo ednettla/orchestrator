@@ -133,6 +133,7 @@ export interface RequirementsCounts {
 export interface DaemonStatus {
   running: boolean;
   pid?: number;
+  startedAt?: string;
 }
 
 /**
