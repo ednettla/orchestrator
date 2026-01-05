@@ -347,86 +347,97 @@ async function runTuiSubFlow(
 ): Promise<void> {
   const subRunner = new FlowRunner(flow, renderer, baseContext);
 
-  while (true) {
-    const response = await subRunner.runCurrentStep();
+  try {
+    while (true) {
+      const response = await subRunner.runCurrentStep();
 
-    // Handle cancellation
-    if (response === null) {
-      const step = subRunner.getCurrentStep();
-      const interaction = step?.interaction(subRunner.getContext());
+      // Handle cancellation
+      if (response === null) {
+        const step = subRunner.getCurrentStep();
+        const interaction = step?.interaction(subRunner.getContext());
 
-      if (interaction?.type === 'display') {
-        const result = await subRunner.handleResponse(null);
+        if (interaction?.type === 'display') {
+          const result = await subRunner.handleResponse(null);
+          if (result.done) break;
+          continue;
+        }
+
+        break;
+      }
+
+      // Handle progress interaction
+      if (response && typeof response === 'object' && 'update' in response) {
+        const result = await subRunner.handleResponse(response);
         if (result.done) break;
         continue;
       }
 
-      break;
-    }
-
-    // Handle progress interaction
-    if (response && typeof response === 'object' && 'update' in response) {
+      // Handle response
       const result = await subRunner.handleResponse(response);
-      if (result.done) break;
-      continue;
-    }
 
-    // Handle response
-    const result = await subRunner.handleResponse(response);
+      // Check for action markers
+      const currentStepId = subRunner.getCurrentStepId();
+      if (isActionMarker(currentStepId)) {
+        const actionName = getActionName(currentStepId);
+        const ctx = subRunner.getContext();
 
-    // Check for action markers
-    const currentStepId = subRunner.getCurrentStepId();
-    if (isActionMarker(currentStepId)) {
-      const actionName = getActionName(currentStepId);
-      const ctx = subRunner.getContext();
+        const actionResult = await executeAction(actionName, ctx, 'cli');
 
-      const actionResult = await executeAction(actionName, ctx, 'cli');
+        // Navigate to the step returned by the action
+        let navigated = false;
+        if (actionResult.nextStep) {
+          navigated = subRunner.navigateTo(actionResult.nextStep);
+        }
+        if (!navigated) {
+          subRunner.navigateTo('menu');
+        }
 
-      // Navigate to the step returned by the action
-      let navigated = false;
-      if (actionResult.nextStep) {
-        navigated = subRunner.navigateTo(actionResult.nextStep);
+        // Refresh context after action
+        const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+        subRunner.updateContext({ ...refreshed, ...ctx });
+        continue;
       }
-      if (!navigated) {
+
+      // Check for nested flow markers
+      if (currentStepId.startsWith('flow:')) {
+        const nestedFlowId = getSubFlowId(currentStepId);
+        const ctx = subRunner.getContext();
+
+        switch (nestedFlowId) {
+          case 'run':
+            await runTuiSubFlow(runFlow, ctx as RunFlowContext, projectPath, renderer);
+            break;
+          case 'mcp':
+            await runTuiSubFlow(mcpFlow, ctx as ConfigFlowContext, projectPath, renderer);
+            break;
+          case 'plan':
+            await runTuiSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath, renderer);
+            break;
+          case 'worktrees':
+            await runTuiSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath, renderer);
+            break;
+        }
+
+        // After nested flow, refresh and go back to this flow's menu
         subRunner.navigateTo('menu');
+        const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
+        subRunner.updateContext({ ...refreshed, ...ctx });
+        continue;
       }
 
-      // Refresh context after action
-      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
-      subRunner.updateContext({ ...refreshed, ...ctx });
-      continue;
-    }
-
-    // Check for nested flow markers
-    if (currentStepId.startsWith('flow:')) {
-      const nestedFlowId = getSubFlowId(currentStepId);
-      const ctx = subRunner.getContext();
-
-      switch (nestedFlowId) {
-        case 'run':
-          await runTuiSubFlow(runFlow, ctx as RunFlowContext, projectPath, renderer);
-          break;
-        case 'mcp':
-          await runTuiSubFlow(mcpFlow, ctx as ConfigFlowContext, projectPath, renderer);
-          break;
-        case 'plan':
-          await runTuiSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath, renderer);
-          break;
-        case 'worktrees':
-          await runTuiSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath, renderer);
-          break;
+      if (result.done) {
+        break;
       }
-
-      // After nested flow, refresh and go back to this flow's menu
-      subRunner.navigateTo('menu');
-      const refreshed = await buildFlowContext(projectPath, createCliUser(), 'cli');
-      subRunner.updateContext({ ...refreshed, ...ctx });
-      continue;
     }
-
-    if (result.done) {
-      break;
-    }
+  } catch (error) {
+    // Display error in TUI and return gracefully
+    const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+    await renderer.display({
+      type: 'display',
+      message: `Error: ${errorMessage}`,
+      format: 'error',
+    });
+    // Return to allow parent flow to continue
   }
 }
 
@@ -434,21 +445,47 @@ async function runTuiSubFlow(
 // Main Menu
 // ============================================================================
 
-export async function mainMenuCommand(options: { path: string; tui?: boolean }): Promise<void> {
+export async function mainMenuCommand(options: { path: string; classic?: boolean }): Promise<void> {
   const projectPath = path.resolve(options.path);
 
   // Build flow context
   const baseContext = await buildFlowContext(projectPath, createCliUser(), 'cli');
   const flowContext: MainMenuContext = { ...baseContext };
 
-  // Use TUI renderer if requested
-  if (options.tui) {
-    const { renderer, cleanup } = await createTuiRenderer(flowContext.projectName);
-    await runTuiMenu(renderer, flowContext, projectPath, cleanup);
-    return;
+  // Use TUI renderer by default (unless --classic is specified or not a TTY)
+  const useTui = !options.classic && process.stdout.isTTY && process.stdin.isTTY;
+
+  if (useTui) {
+    try {
+      const { renderer, cleanup } = await createTuiRenderer(flowContext.projectName);
+
+      // Set up signal handlers to ensure clean exit
+      const handleSignal = () => {
+        cleanup();
+        process.exit(0);
+      };
+      process.on('SIGINT', handleSignal);
+      process.on('SIGTERM', handleSignal);
+
+      try {
+        await runTuiMenu(renderer, flowContext, projectPath, cleanup);
+      } finally {
+        // Remove signal handlers after TUI exits
+        process.off('SIGINT', handleSignal);
+        process.off('SIGTERM', handleSignal);
+      }
+      return;
+    } catch (error) {
+      // TUI failed to initialize - fall back to classic mode
+      console.error(chalk.yellow('TUI mode unavailable, falling back to classic mode'));
+      if (error instanceof Error && error.message) {
+        console.error(chalk.dim(`  Reason: ${error.message}`));
+      }
+      // Continue to classic mode below
+    }
   }
 
-  // Use classic CLI flow system
+  // Use classic CLI flow system (for non-TTY environments or when explicitly requested)
   flowPrintBanner();
 
   // Print context info

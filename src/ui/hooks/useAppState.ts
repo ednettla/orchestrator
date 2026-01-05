@@ -190,17 +190,7 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
 
   const showDisplay = useCallback((interaction: DisplayInteraction): Promise<void> => {
     return new Promise((resolve) => {
-      setState((prev) => ({
-        ...prev,
-        view: {
-          type: 'display',
-          message: interaction.message,
-          format: interaction.format ?? 'info',
-          resolve,
-        },
-      }));
-      // Auto-resolve display messages after a short delay to allow reading
-      setTimeout(() => {
+      const handleResolve = () => {
         resolve();
         setState((prev) => {
           if (prev.view.type === 'display') {
@@ -208,7 +198,17 @@ export function useAppState(initialProjectName?: string): [AppState, AppStateAct
           }
           return prev;
         });
-      }, 1500);
+      };
+
+      setState((prev) => ({
+        ...prev,
+        view: {
+          type: 'display',
+          message: interaction.message,
+          format: interaction.format ?? 'info',
+          resolve: handleResolve,
+        },
+      }));
     });
   }, []);
 

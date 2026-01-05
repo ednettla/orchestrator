@@ -349,9 +349,9 @@ registerTelegramCommand(program);
 
 // Show interactive menu when no command is provided
 program
-  .option('--tui', 'Use full-screen terminal UI (experimental)')
+  .option('--classic', 'Use classic sequential prompts instead of full-screen TUI')
   .action(async (opts) => {
-    await mainMenuCommand({ path: process.cwd(), tui: opts.tui });
+    await mainMenuCommand({ path: process.cwd(), classic: opts.classic });
   });
 
 program.parse();

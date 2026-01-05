@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import { useScreenSize } from 'fullscreen-ink';
 import { colors, borders, icons } from '../styles.js';
 
 interface Shortcut {
@@ -27,10 +28,13 @@ const defaultShortcuts: Shortcut[] = [
 ];
 
 export function Footer({ shortcuts = defaultShortcuts }: FooterProps): React.ReactElement {
+  const { width } = useScreenSize();
+  const dividerWidth = Math.max(20, width - 4); // Account for padding
+
   return (
     <Box flexDirection="column">
       <Box paddingX={1}>
-        <Text color={colors.border}>{borders.horizontal.repeat(60)}</Text>
+        <Text color={colors.border}>{borders.horizontal.repeat(dividerWidth)}</Text>
       </Box>
       <Box paddingX={1} gap={2}>
         {shortcuts.map((shortcut, index) => (

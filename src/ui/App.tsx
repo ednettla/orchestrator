@@ -8,10 +8,12 @@
  */
 
 import React, { useEffect } from 'react';
-import { Box, useApp, useInput } from 'ink';
-import { Header, Footer, Menu, TextInput, Confirm, Spinner, Display } from './components/index.js';
+import { Box, Text, useApp, useInput } from 'ink';
+import { FullScreenBox } from 'fullscreen-ink';
+import { Header, Footer, Menu, TextInput, Confirm, Spinner, Display, ErrorBoundary } from './components/index.js';
 import type { AppState, AppStateActions, ViewState } from './hooks/useAppState.js';
 import type { MenuItem } from './components/Menu.js';
+import { colors, icons } from './styles.js';
 
 // ============================================================================
 // Props
@@ -28,9 +30,27 @@ interface AppProps {
 
 interface ViewRendererProps {
   view: ViewState;
+  error?: string | undefined;
 }
 
-function ViewRenderer({ view }: ViewRendererProps): React.ReactElement | null {
+function ViewRenderer({ view, error }: ViewRendererProps): React.ReactElement | null {
+  // Show error overlay if present
+  if (error) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Box marginBottom={1}>
+          <Text color={colors.error}>{icons.error} Error</Text>
+        </Box>
+        <Box>
+          <Text color={colors.error}>{error}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={colors.muted}>Press any key to continue...</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   switch (view.type) {
     case 'menu': {
       const items: MenuItem[] = view.interaction.options.map((opt) => ({
@@ -57,6 +77,7 @@ function ViewRenderer({ view }: ViewRendererProps): React.ReactElement | null {
         <TextInput
           message={view.interaction.message}
           placeholder={view.interaction.placeholder}
+          multiline={view.interaction.multiline}
           onSubmit={(value) => view.resolve(value)}
           onCancel={() => view.resolve(null)}
           validate={view.interaction.validate}
@@ -69,6 +90,8 @@ function ViewRenderer({ view }: ViewRendererProps): React.ReactElement | null {
           message={view.interaction.message}
           onConfirm={(confirmed) => view.resolve(confirmed)}
           destructive={view.interaction.destructive}
+          confirmLabel={view.interaction.confirmLabel}
+          cancelLabel={view.interaction.cancelLabel}
         />
       );
 
@@ -76,11 +99,21 @@ function ViewRenderer({ view }: ViewRendererProps): React.ReactElement | null {
       return <Spinner message={view.message} state={view.state} />;
 
     case 'display':
-      return <Display message={view.message} format={view.format} />;
+      return (
+        <Display
+          message={view.message}
+          format={view.format}
+          onContinue={() => view.resolve()}
+        />
+      );
 
     case 'idle':
     default:
-      return null;
+      return (
+        <Box paddingX={1}>
+          <Text color={colors.muted}>Ready...</Text>
+        </Box>
+      );
   }
 }
 
@@ -88,26 +121,46 @@ function ViewRenderer({ view }: ViewRendererProps): React.ReactElement | null {
 // Footer Shortcuts
 // ============================================================================
 
-function getShortcuts(view: ViewState): Array<{ key: string; label: string }> {
+function getShortcuts(view: ViewState, hasError: boolean): Array<{ key: string; label: string }> {
+  if (hasError) {
+    return [{ key: 'any key', label: 'Continue' }];
+  }
+
   switch (view.type) {
     case 'menu':
       return [
-        { key: '\u2191/\u2193', label: 'Navigate' },
+        { key: 'j/k', label: 'Navigate' },
         { key: 'Enter', label: 'Select' },
         { key: 'Esc', label: 'Back' },
         { key: 'q', label: 'Quit' },
       ];
-    case 'input':
+    case 'input': {
+      const inputView = view as { interaction: { multiline?: boolean } };
+      if (inputView.interaction.multiline) {
+        return [
+          { key: 'Enter', label: 'New line' },
+          { key: 'Ctrl+Enter', label: 'Submit' },
+          { key: 'Esc', label: 'Cancel' },
+        ];
+      }
       return [
         { key: 'Enter', label: 'Submit' },
         { key: 'Esc', label: 'Cancel' },
       ];
+    }
     case 'confirm':
       return [
         { key: '\u2190/\u2192', label: 'Select' },
         { key: 'y/n', label: 'Quick' },
         { key: 'Enter', label: 'Confirm' },
       ];
+    case 'display':
+      return [
+        { key: 'Enter', label: 'Continue' },
+        { key: 'Esc', label: 'Continue' },
+      ];
+    case 'progress':
+      return [{ key: 'Ctrl+C', label: 'Cancel' }];
     default:
       return [{ key: 'q', label: 'Quit' }];
   }
@@ -120,10 +173,21 @@ function getShortcuts(view: ViewState): Array<{ key: string; label: string }> {
 export function App({ state, actions }: AppProps): React.ReactElement {
   const { exit } = useApp();
 
-  // Handle global quit shortcut
+  // Handle global keyboard shortcuts
   useInput((input, key) => {
-    // Only handle 'q' when not in input mode
-    if (input === 'q' && state.view.type !== 'input') {
+    // Clear error on any key
+    if (state.error) {
+      actions.setError(undefined);
+      return;
+    }
+
+    // Handle 'q' to quit when not in input mode
+    if (input === 'q' && state.view.type !== 'input' && state.view.type !== 'display') {
+      actions.exit();
+    }
+
+    // Handle Ctrl+C
+    if (key.ctrl && input === 'c') {
       actions.exit();
     }
   });
@@ -135,17 +199,19 @@ export function App({ state, actions }: AppProps): React.ReactElement {
     }
   }, [state.exiting, exit]);
 
-  const shortcuts = getShortcuts(state.view);
+  const shortcuts = getShortcuts(state.view, !!state.error);
 
   return (
-    <Box flexDirection="column" height="100%">
-      <Header projectName={state.projectName} />
+    <ErrorBoundary>
+      <FullScreenBox flexDirection="column">
+        <Header projectName={state.projectName} />
 
-      <Box flexGrow={1} flexDirection="column" paddingY={1}>
-        <ViewRenderer view={state.view} />
-      </Box>
+        <Box flexGrow={1} flexDirection="column" paddingY={1}>
+          <ViewRenderer view={state.view} error={state.error} />
+        </Box>
 
-      <Footer shortcuts={shortcuts} />
-    </Box>
+        <Footer shortcuts={shortcuts} />
+      </FullScreenBox>
+    </ErrorBoundary>
   );
 }

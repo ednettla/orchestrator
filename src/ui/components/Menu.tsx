@@ -36,10 +36,13 @@ export function Menu({
 }: MenuProps): React.ReactElement {
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
 
+  // Check if there are any enabled items
+  const enabledItems = items.filter((item) => !item.disabled);
+  const hasEnabledItems = enabledItems.length > 0;
+
   // Find first non-disabled item if initial is disabled
   useEffect(() => {
-    const enabledItems = items.filter((item) => !item.disabled);
-    if (enabledItems.length === 0) return;
+    if (!hasEnabledItems) return;
 
     if (items[selectedIndex]?.disabled) {
       const firstEnabledIndex = items.findIndex((item) => !item.disabled);
@@ -47,7 +50,7 @@ export function Menu({
         setSelectedIndex(firstEnabledIndex);
       }
     }
-  }, [items, selectedIndex]);
+  }, [items, selectedIndex, hasEnabledItems]);
 
   const moveUp = useCallback(() => {
     setSelectedIndex((current) => {
@@ -84,6 +87,60 @@ export function Menu({
     }
   });
 
+  // Handle empty menu
+  if (items.length === 0) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {message && (
+          <Box marginBottom={1}>
+            <Text bold color={colors.text}>{message}</Text>
+          </Box>
+        )}
+        <Box>
+          <Text color={colors.muted}>{icons.info} No options available</Text>
+        </Box>
+        {onCancel && (
+          <Box marginTop={1}>
+            <Text color={colors.muted}>Press Esc to go back</Text>
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  // Handle all items disabled
+  if (!hasEnabledItems) {
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {message && (
+          <Box marginBottom={1}>
+            <Text bold color={colors.text}>{message}</Text>
+          </Box>
+        )}
+        {items.map((item) => (
+          <Box key={item.id} flexDirection="column">
+            <Box>
+              <Text color={colors.muted}>  </Text>
+              {item.icon && <Text color={colors.disabled}>{item.icon} </Text>}
+              <Text color={colors.disabled}>{item.label}</Text>
+              {item.disabledReason && (
+                <Text color={colors.disabled}> ({item.disabledReason})</Text>
+              )}
+            </Box>
+          </Box>
+        ))}
+        <Box marginTop={1}>
+          <Text color={colors.warning}>{icons.warning} All options are currently unavailable</Text>
+        </Box>
+        {onCancel && (
+          <Box marginTop={1}>
+            <Text color={colors.muted}>Press Esc to go back</Text>
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" paddingX={1}>
       {message && (
@@ -114,7 +171,7 @@ export function Menu({
                 <Text color={colors.disabled}> ({item.disabledReason})</Text>
               )}
             </Box>
-            {item.description && isSelected && !isDisabled && (
+            {item.description && isSelected && (
               <Box marginLeft={4}>
                 <Text color={colors.muted}>{item.description}</Text>
               </Box>

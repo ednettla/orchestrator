@@ -8,7 +8,11 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import { useScreenSize } from 'fullscreen-ink';
 import { colors, borders, icons } from '../styles.js';
+
+// Read version from package.json at build time
+const VERSION = process.env['npm_package_version'] ?? '0.1.x';
 
 interface HeaderProps {
   projectName?: string | undefined;
@@ -16,7 +20,10 @@ interface HeaderProps {
   status?: 'idle' | 'running' | 'error' | undefined;
 }
 
-export function Header({ projectName, version = '0.1.15', status }: HeaderProps): React.ReactElement {
+export function Header({ projectName, version = VERSION, status }: HeaderProps): React.ReactElement {
+  const { width } = useScreenSize();
+  const dividerWidth = Math.max(20, width - 4); // Account for padding
+
   const statusIndicator = status === 'running'
     ? <Text color={colors.success}>{icons.running}</Text>
     : status === 'error'
@@ -37,7 +44,7 @@ export function Header({ projectName, version = '0.1.15', status }: HeaderProps)
         )}
       </Box>
       <Box paddingX={1}>
-        <Text color={colors.border}>{borders.horizontal.repeat(60)}</Text>
+        <Text color={colors.border}>{borders.horizontal.repeat(dividerWidth)}</Text>
       </Box>
     </Box>
   );

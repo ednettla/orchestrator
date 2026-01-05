@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render } from 'ink';
+import { withFullScreen } from 'fullscreen-ink';
 import { App } from '../../ui/App.js';
 import { useAppState, type AppStateActions } from '../../ui/hooks/useAppState.js';
 import type {
@@ -27,31 +27,36 @@ import type {
 
 interface TuiAppState {
   actions: AppStateActions | null;
-  cleanup: (() => void) | null;
+  instance: ReturnType<typeof withFullScreen> | null;
 }
 
 // Global state to hold the app actions
 const tuiState: TuiAppState = {
   actions: null,
-  cleanup: null,
+  instance: null,
 };
+
+// Promise resolvers for async operations
+let readyResolver: ((actions: AppStateActions) => void) | null = null;
 
 /**
  * Wrapper component that captures the app state actions
  */
 function TuiAppWrapper({
   projectName,
-  onReady,
 }: {
   projectName?: string;
-  onReady: (actions: AppStateActions) => void;
 }): React.ReactElement {
   const [state, actions] = useAppState(projectName);
 
   // Capture actions on first render
   React.useEffect(() => {
-    onReady(actions);
-  }, [actions, onReady]);
+    tuiState.actions = actions;
+    if (readyResolver) {
+      readyResolver(actions);
+      readyResolver = null;
+    }
+  }, [actions]);
 
   return React.createElement(App, { state, actions });
 }
@@ -63,8 +68,8 @@ function TuiAppWrapper({
 /**
  * Create a TUI renderer instance
  *
- * This starts the Ink app and returns a renderer that can be used
- * with the FlowRunner.
+ * This starts the Ink app in full-screen mode and returns a renderer
+ * that can be used with the FlowRunner.
  *
  * @param projectName - Optional project name to display in header
  * @returns Promise that resolves to the renderer and a cleanup function
@@ -72,76 +77,89 @@ function TuiAppWrapper({
 export async function createTuiRenderer(
   projectName?: string
 ): Promise<{ renderer: Renderer; cleanup: () => void }> {
-  return new Promise((resolve) => {
-    const handleReady = (actions: AppStateActions): void => {
-      tuiState.actions = actions;
+  // Create the app element
+  const props: { projectName?: string } = {};
+  if (projectName !== undefined) {
+    props.projectName = projectName;
+  }
+  const appElement = React.createElement(TuiAppWrapper, props);
 
-      const renderer: Renderer = {
-        async select(interaction: SelectInteraction): Promise<string | null> {
-          if (!tuiState.actions) {
-            throw new Error('TUI not initialized');
-          }
-          return tuiState.actions.showMenu(interaction);
-        },
-
-        async input(interaction: InputInteraction): Promise<string | null> {
-          if (!tuiState.actions) {
-            throw new Error('TUI not initialized');
-          }
-          return tuiState.actions.showInput(interaction);
-        },
-
-        async confirm(interaction: ConfirmInteraction): Promise<boolean> {
-          if (!tuiState.actions) {
-            throw new Error('TUI not initialized');
-          }
-          return tuiState.actions.showConfirm(interaction);
-        },
-
-        progress(interaction: ProgressInteraction): ProgressHandle {
-          if (!tuiState.actions) {
-            throw new Error('TUI not initialized');
-          }
-          return tuiState.actions.showProgress(interaction);
-        },
-
-        async display(interaction: DisplayInteraction): Promise<void> {
-          if (!tuiState.actions) {
-            throw new Error('TUI not initialized');
-          }
-          return tuiState.actions.showDisplay(interaction);
-        },
-      };
-
-      resolve({
-        renderer,
-        cleanup: () => {
-          if (tuiState.cleanup) {
-            tuiState.cleanup();
-          }
-          tuiState.actions = null;
-          tuiState.cleanup = null;
-        },
-      });
-    };
-
-    // Render the app
-    const props: { projectName?: string; onReady: (actions: AppStateActions) => void } = { onReady: handleReady };
-    if (projectName !== undefined) {
-      props.projectName = projectName;
-    }
-    const { unmount, waitUntilExit } = render(
-      React.createElement(TuiAppWrapper, props)
-    );
-
-    tuiState.cleanup = unmount;
-
-    // Handle app exit
-    waitUntilExit().then(() => {
-      tuiState.actions = null;
-      tuiState.cleanup = null;
-    });
+  // Create full-screen instance
+  const instance = withFullScreen(appElement, {
+    exitOnCtrlC: false, // We handle exit ourselves
   });
+  tuiState.instance = instance;
+
+  // Start the full-screen app (enters alternate buffer)
+  await instance.start();
+
+  // Wait for the app to be ready and capture actions (with timeout)
+  const actions = await new Promise<AppStateActions>((resolve, reject) => {
+    // Timeout after 5 seconds if React component doesn't initialize
+    const timeout = setTimeout(() => {
+      readyResolver = null;
+      reject(new Error('TUI initialization timed out - React component failed to mount'));
+    }, 5000);
+
+    if (tuiState.actions) {
+      clearTimeout(timeout);
+      resolve(tuiState.actions);
+    } else {
+      readyResolver = (actions) => {
+        clearTimeout(timeout);
+        resolve(actions);
+      };
+    }
+  });
+
+  const renderer: Renderer = {
+    async select(interaction: SelectInteraction): Promise<string | null> {
+      if (!tuiState.actions) {
+        throw new Error('TUI not initialized');
+      }
+      return tuiState.actions.showMenu(interaction);
+    },
+
+    async input(interaction: InputInteraction): Promise<string | null> {
+      if (!tuiState.actions) {
+        throw new Error('TUI not initialized');
+      }
+      return tuiState.actions.showInput(interaction);
+    },
+
+    async confirm(interaction: ConfirmInteraction): Promise<boolean> {
+      if (!tuiState.actions) {
+        throw new Error('TUI not initialized');
+      }
+      return tuiState.actions.showConfirm(interaction);
+    },
+
+    progress(interaction: ProgressInteraction): ProgressHandle {
+      if (!tuiState.actions) {
+        throw new Error('TUI not initialized');
+      }
+      return tuiState.actions.showProgress(interaction);
+    },
+
+    async display(interaction: DisplayInteraction): Promise<void> {
+      if (!tuiState.actions) {
+        throw new Error('TUI not initialized');
+      }
+      return tuiState.actions.showDisplay(interaction);
+    },
+  };
+
+  return {
+    renderer,
+    cleanup: () => {
+      // Unmount the Ink instance to properly exit fullscreen mode
+      if (tuiState.instance) {
+        tuiState.instance.instance.unmount();
+      }
+      tuiState.actions = null;
+      tuiState.instance = null;
+    },
+  };
 }
 
 /**

@@ -13,3 +13,4 @@ export { TextInput } from './TextInput.js';
 export { Confirm } from './Confirm.js';
 export { Spinner } from './Spinner.js';
 export { Display, type DisplayFormat } from './Display.js';
+export { ErrorBoundary } from './ErrorBoundary.js';

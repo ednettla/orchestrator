@@ -15,6 +15,8 @@ interface ConfirmProps {
   onConfirm: (confirmed: boolean) => void;
   destructive?: boolean | undefined;
   defaultValue?: boolean | undefined;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
 }
 
 export function Confirm({
@@ -22,6 +24,8 @@ export function Confirm({
   onConfirm,
   destructive = false,
   defaultValue = true,
+  confirmLabel = 'Yes',
+  cancelLabel = 'No',
 }: ConfirmProps): React.ReactElement {
   const [selected, setSelected] = useState<boolean>(destructive ? false : defaultValue);
 
@@ -42,7 +46,7 @@ export function Confirm({
   });
 
   const yesColor = selected ? (destructive ? colors.error : colors.success) : colors.muted;
-  const noColor = !selected ? colors.muted : colors.muted;
+  const noColor = !selected ? colors.success : colors.muted;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -55,13 +59,13 @@ export function Confirm({
           <Text color={yesColor}>
             {selected ? `${icons.pointer} ` : '  '}
           </Text>
-          <Text color={yesColor} bold={selected}>Yes</Text>
+          <Text color={yesColor} bold={selected}>{confirmLabel}</Text>
         </Box>
         <Box>
           <Text color={noColor}>
             {!selected ? `${icons.pointer} ` : '  '}
           </Text>
-          <Text color={noColor} bold={!selected}>No</Text>
+          <Text color={noColor} bold={!selected}>{cancelLabel}</Text>
         </Box>
       </Box>
       <Box marginTop={1}>
