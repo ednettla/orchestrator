@@ -90,13 +90,12 @@ export async function createTuiRenderer(
   });
   tuiState.instance = instance;
 
-  // Start the full-screen app (enters alternate buffer)
-  await instance.start();
-
-  // Wait for the app to be ready and capture actions (with timeout)
-  const actions = await new Promise<AppStateActions>((resolve, reject) => {
+  // Set up the initialization promise BEFORE starting the app
+  // This prevents race condition where React renders before readyResolver is set
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const initPromise = new Promise<AppStateActions>((resolve, reject) => {
     // Timeout after 5 seconds if React component doesn't initialize
-    const timeout = setTimeout(() => {
+    timeoutId = setTimeout(() => {
       readyResolver = null;
       // Clean up the instance on timeout to exit alternate buffer
       if (tuiState.instance) {
@@ -111,16 +110,30 @@ export async function createTuiRenderer(
       reject(new Error('TUI initialization timed out - React component failed to mount'));
     }, 5000);
 
-    if (tuiState.actions) {
-      clearTimeout(timeout);
-      resolve(tuiState.actions);
-    } else {
-      readyResolver = (actions) => {
-        clearTimeout(timeout);
-        resolve(actions);
-      };
-    }
+    // Set up the resolver BEFORE starting the app
+    readyResolver = (actions) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      resolve(actions);
+    };
   });
+
+  // Start the full-screen app (enters alternate buffer)
+  // React may call readyResolver during or after this call
+  await instance.start();
+
+  // Check if actions were already captured (fast init)
+  if (tuiState.actions) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    readyResolver = null;
+  }
+
+  // Wait for the app to be ready
+  const actions = await initPromise;
 
   const renderer: Renderer = {
     async select(interaction: SelectInteraction): Promise<string | null> {
@@ -159,12 +172,28 @@ export async function createTuiRenderer(
     },
   };
 
+  // Track if cleanup has been called to make it idempotent
+  let cleanedUp = false;
+
   return {
     renderer,
     cleanup: () => {
+      // Make cleanup idempotent - safe to call multiple times
+      if (cleanedUp) {
+        return;
+      }
+      cleanedUp = true;
+
+      // Clear the ready resolver to prevent late callbacks
+      readyResolver = null;
+
       // Unmount the Ink instance to properly exit fullscreen mode
       if (tuiState.instance) {
-        tuiState.instance.instance.unmount();
+        try {
+          tuiState.instance.instance.unmount();
+        } catch {
+          // Ignore unmount errors - instance may already be unmounted
+        }
       }
       tuiState.actions = null;
       tuiState.instance = null;
