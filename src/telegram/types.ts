@@ -41,6 +41,7 @@ export interface CommandResult {
   keyboard?: unknown;  // InlineKeyboard from grammy
   parseMode?: 'HTML' | 'Markdown' | 'MarkdownV2';
   silent?: boolean;
+  skipReply?: boolean;  // Don't send a reply (handler already sent messages)
 }
 
 // ============================================================================

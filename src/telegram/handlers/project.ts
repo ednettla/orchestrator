@@ -10,7 +10,7 @@ import type { CommandContext, CommandResult } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
 import { projectSelectionKeyboard } from '../keyboards.js';
-import { createProject } from '../project-bridge.js';
+import { startProjectWizard } from '../flows/project-wizard.js';
 
 /**
  * Handle /projects command
@@ -125,69 +125,22 @@ export async function switchHandler(ctx: CommandContext): Promise<CommandResult>
 
 /**
  * Handle /new command
+ *
+ * Starts an interactive wizard for project creation.
  */
 export async function newProjectHandler(ctx: CommandContext): Promise<CommandResult> {
   const { args, quotedArg } = ctx;
 
-  const projectName = quotedArg ?? args.join(' ');
+  const rawName = quotedArg ?? args.join(' ');
+  const projectName = rawName || undefined;
 
-  if (!projectName) {
-    return {
-      success: false,
-      response:
-        'Usage: `/new <project-name>`\n\n' +
-        'Example: `/new my-awesome-app`\n\n' +
-        'This will create a new directory and initialize the project.',
-      parseMode: 'Markdown',
-    };
-  }
+  // Start the wizard (it handles validation internally)
+  await startProjectWizard(ctx.ctx, projectName);
 
-  // Validate project name
-  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(projectName)) {
-    return {
-      success: false,
-      response:
-        'Invalid project name.\n\n' +
-        'Project names must:\n' +
-        '• Start with a letter\n' +
-        '• Contain only letters, numbers, hyphens, and underscores',
-    };
-  }
-
-  // Check if project already exists
-  const registry = getProjectRegistry();
-  const existing = registry.getProject(projectName);
-
-  if (existing) {
-    return {
-      success: false,
-      response: `A project named \`${projectName}\` already exists.\n\nPath: \`${existing.path}\``,
-      parseMode: 'Markdown',
-    };
-  }
-
-  // Get the projects directory from global store
-  const store = getGlobalStore();
-  const basePath = store.getProjectsDirectory();
-
-  // Create the project
-  const result = await createProject(basePath, projectName);
-
-  if (!result.success) {
-    return {
-      success: false,
-      response: `❌ Failed to create project:\n${result.error}`,
-    };
-  }
-
+  // Return empty result since wizard handles all responses
   return {
     success: true,
-    response:
-      `✅ *Project Created*\n\n` +
-      `Name: ${projectName}\n` +
-      `Path: \`${result.projectPath}\`\n\n` +
-      `Use \`/${projectName} status\` to check project status.\n` +
-      `Use \`/${projectName} add \"requirement\"\` to add requirements.`,
-    parseMode: 'Markdown',
+    response: '', // Wizard sends its own messages
+    skipReply: true,
   };
 }

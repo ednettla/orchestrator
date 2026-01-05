@@ -10,6 +10,7 @@ import type { Bot, Context } from 'grammy';
 import { parseCallbackData, type CallbackData } from '../types.js';
 import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
+import { handleWizardCallback } from '../flows/project-wizard.js';
 import {
   getProjectStatus,
   getDaemonStatus,
@@ -46,7 +47,7 @@ async function safeEditMessage(
   options?: Parameters<Context['editMessageText']>[1]
 ): Promise<boolean> {
   try {
-    await safeEditMessage(ctx,text, options);
+    await ctx.editMessageText(text, options);
     return true;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -90,7 +91,15 @@ export function registerCallbackHandlers(bot: Bot): void {
  * Main callback router
  */
 async function handleCallback(ctx: Context): Promise<void> {
-  const data = parseCallbackData(ctx.callbackQuery?.data ?? '');
+  const rawData = ctx.callbackQuery?.data ?? '';
+
+  // Handle wizard callbacks first (wizard:category:action:...)
+  if (rawData.startsWith('wizard:')) {
+    await handleWizardCallback(ctx, rawData);
+    return;
+  }
+
+  const data = parseCallbackData(rawData);
   const store = getGlobalStore();
   const user = store.getUser(ctx.from?.id ?? 0);
 

@@ -12,6 +12,7 @@ import { getGlobalStore } from '../core/global-store.js';
 import { createWebAppServer, type WebAppServer } from './webapp/server.js';
 import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, registerCallbackHandlers, getHelpText } from './handlers/index.js';
 import { routeCommand } from './router.js';
+import { handleWizardTextInput } from './flows/project-wizard.js';
 
 let bot: Bot | null = null;
 let webappServer: WebAppServer | null = null;
@@ -69,9 +70,21 @@ export async function startBot(): Promise<void> {
     const user = (ctx as any).authorizedUser;
     if (!user) return;
 
+    const text = ctx.message?.text;
+    if (!text) return;
+
+    // Check if wizard is waiting for text input
+    if (!text.startsWith('/')) {
+      const handled = await handleWizardTextInput(ctx, text);
+      if (handled) return;
+    }
+
     const result = await routeCommand(ctx, user);
 
     if (result) {
+      // Skip reply if handler already sent messages
+      if (result.skipReply) return;
+
       const options: any = {};
       if (result.parseMode) options.parse_mode = result.parseMode;
       if (result.keyboard) options.reply_markup = result.keyboard;
