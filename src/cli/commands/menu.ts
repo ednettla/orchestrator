@@ -20,6 +20,8 @@ import {
   runFlow,
   requirementsFlow,
   planMenuFlow,
+  planEditReqsFlow,
+  planEditQuestionsFlow,
   configFlow,
   mcpFlow,
   initFlow,
@@ -34,7 +36,7 @@ import {
   // Flow registry
   getFlow,
 } from '../../interactions/index.js';
-import type { MainMenuContext, DaemonFlowContext, RunFlowContext, RequirementsFlowContext, PlanFlowContext, ConfigFlowContext, InitFlowContext, WorktreesFlowContext, SecretsFlowContext, ProjectsFlowContext, TelegramSettingsFlowContext, Renderer } from '../../interactions/index.js';
+import type { MainMenuContext, DaemonFlowContext, RunFlowContext, RequirementsFlowContext, PlanFlowContext, PlanEditContext, ConfigFlowContext, InitFlowContext, WorktreesFlowContext, SecretsFlowContext, ProjectsFlowContext, TelegramSettingsFlowContext, Renderer } from '../../interactions/index.js';
 
 interface MenuContext {
   hasProject: boolean;
@@ -413,8 +415,22 @@ async function runTuiSubFlow(
           case 'plan':
             await runTuiSubFlow(planMenuFlow, ctx as PlanFlowContext, projectPath, renderer);
             break;
+          case 'plan-edit-reqs':
+            await runTuiSubFlow(planEditReqsFlow, ctx as PlanEditContext, projectPath, renderer);
+            break;
+          case 'plan-edit-questions':
+            await runTuiSubFlow(planEditQuestionsFlow, ctx as PlanEditContext, projectPath, renderer);
+            break;
           case 'worktrees':
             await runTuiSubFlow(worktreesFlow, ctx as WorktreesFlowContext, projectPath, renderer);
+            break;
+          default:
+            // Unknown nested flow - display warning and continue
+            await renderer.display({
+              type: 'display',
+              message: `Unknown flow: ${nestedFlowId}`,
+              format: 'warning',
+            });
             break;
         }
 
