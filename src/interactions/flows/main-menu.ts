@@ -7,7 +7,7 @@
  * @module interactions/flows/main-menu
  */
 
-import type { Flow, FlowContext, SelectOption } from '../types.js';
+import type { Flow, FlowContext, SelectOption, ProgressHandle } from '../types.js';
 import { statusCommand } from '../../cli/commands/status.js';
 import { checkForUpdates, updateToLatest, getCurrentVersion } from '../../cli/updater.js';
 
@@ -210,14 +210,22 @@ export const mainMenuFlow: Flow<MainMenuContext> = {
         message: 'Loading status...',
       }),
       handle: async (response, ctx) => {
-        // Run the status command
-        if (ctx.projectPath) {
-          await statusCommand({ path: ctx.projectPath, json: false });
-          console.log(); // Add spacing
-        } else {
-          console.log('No project initialized');
+        const handle = response as ProgressHandle;
+        try {
+          // Run the status command
+          if (ctx.projectPath) {
+            handle.stop(); // Stop spinner before command output
+            await statusCommand({ path: ctx.projectPath, json: false });
+            console.log(); // Add spacing
+          } else {
+            handle.stop();
+            console.log('No project initialized');
+          }
+          return 'status_continue';
+        } catch (error) {
+          handle.fail(error instanceof Error ? error.message : 'Failed to load status');
+          return 'menu';
         }
-        return 'status_continue';
       },
     },
 
@@ -249,15 +257,19 @@ export const mainMenuFlow: Flow<MainMenuContext> = {
         message: 'Checking for updates...',
       }),
       handle: async (response, ctx) => {
+        const handle = response as ProgressHandle;
         try {
           const info = await checkForUpdates();
           ctx.updateInfo = info;
 
           if (info.isOutdated) {
+            handle.succeed(`Updates available: ${info.commitsBehind} commits behind`);
             return 'update_available';
           }
+          handle.succeed('Already up to date!');
           return 'update_current';
         } catch (error) {
+          handle.fail('Failed to check for updates');
           return 'update_error';
         }
       },
@@ -298,9 +310,16 @@ export const mainMenuFlow: Flow<MainMenuContext> = {
         type: 'progress',
         message: 'Updating orchestrator...',
       }),
-      handle: async () => {
-        await updateToLatest();
-        return 'update_complete';
+      handle: async (response) => {
+        const handle = response as ProgressHandle;
+        try {
+          await updateToLatest();
+          handle.succeed('Update complete!');
+          return 'update_complete';
+        } catch (error) {
+          handle.fail(error instanceof Error ? error.message : 'Update failed');
+          return 'update_error';
+        }
       },
     },
 

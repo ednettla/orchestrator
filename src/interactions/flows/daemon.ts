@@ -7,7 +7,7 @@
  * @module interactions/flows/daemon
  */
 
-import type { Flow, FlowContext, SelectOption } from '../types.js';
+import type { Flow, FlowContext, SelectOption, ProgressHandle } from '../types.js';
 
 /**
  * Extended context for daemon flow

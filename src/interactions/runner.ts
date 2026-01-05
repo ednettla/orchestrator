@@ -204,12 +204,17 @@ export class FlowRunner<TContext extends FlowContext = FlowContext> {
 
   /**
    * Navigate directly to a specific step
+   * @returns true if navigation succeeded, false if step doesn't exist
    */
-  navigateTo(stepId: string): void {
+  navigateTo(stepId: string): boolean {
     if (this.flow.steps[stepId]) {
       this.stepHistory.push(this.currentStepId);
       this.currentStepId = stepId;
+      return true;
     }
+    // Step doesn't exist - log warning for debugging
+    console.warn(`[FlowRunner] navigateTo: step '${stepId}' not found in flow '${this.flow.id}'`);
+    return false;
   }
 
   /**

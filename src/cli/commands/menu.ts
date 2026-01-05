@@ -1537,6 +1537,7 @@ async function runUnifiedSubFlow(
     baseContext
   );
 
+  try {
   while (true) {
     const response = await subRunner.runCurrentStep();
 
@@ -1578,10 +1579,12 @@ async function runUnifiedSubFlow(
       }
 
       // Navigate to the step returned by the action
+      let navigated = false;
       if (actionResult.nextStep) {
-        subRunner.navigateTo(actionResult.nextStep);
-      } else {
-        // No next step from action - go back to menu
+        navigated = subRunner.navigateTo(actionResult.nextStep);
+      }
+      // Fall back to menu if navigation failed or no next step
+      if (!navigated) {
         subRunner.navigateTo('menu');
       }
 
@@ -1618,6 +1621,14 @@ async function runUnifiedSubFlow(
     if (result.error) {
       console.error(chalk.red(`\nError: ${result.error}\n`));
     }
+  }
+  } catch (error) {
+    // Handle Ctrl+C gracefully - just return to main menu
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return;
+    }
+    // Re-throw other errors
+    throw error;
   }
 }
 
@@ -1658,7 +1669,8 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
   // Create flow runner
   const runner = new FlowRunner(mainMenuFlow, cliRenderer, flowContext);
 
-  // Run flow loop
+  // Run flow loop with Ctrl+C handling
+  try {
   while (true) {
     const response = await runner.runCurrentStep();
 
@@ -1746,5 +1758,14 @@ export async function mainMenuCommand(options: { path: string }): Promise<void> 
     if (result.error) {
       console.error(chalk.red(`\nError: ${result.error}\n`));
     }
+  }
+  } catch (error) {
+    // Handle Ctrl+C gracefully
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      console.log(chalk.dim('\nGoodbye!\n'));
+      return;
+    }
+    // Re-throw other errors
+    throw error;
   }
 }
