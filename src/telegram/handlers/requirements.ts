@@ -17,6 +17,7 @@ import {
   updateRequirementPriority,
   deleteRequirement,
 } from '../project-bridge.js';
+import { startRequirementWizard } from '../flows/requirement-wizard.js';
 
 /**
  * Handle add command
@@ -45,14 +46,14 @@ export async function addHandler(ctx: CommandContext): Promise<CommandResult> {
   // Get requirement from quoted arg or remaining args
   const requirement = quotedArg ?? args.join(' ');
 
+  // If no requirement provided, start the wizard
   if (!requirement) {
+    // Start wizard - ctx.ctx is the grammy context
+    await startRequirementWizard(ctx.ctx, project.name);
     return {
-      success: false,
-      response:
-        `Usage: \`/${project.name} add "requirement"\`\n\n` +
-        `Example:\n` +
-        `\`/${project.name} add "Add user login with email/password"\``,
-      parseMode: 'Markdown',
+      success: true,
+      response: '',
+      skipReply: true,
     };
   }
 

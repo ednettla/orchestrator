@@ -14,6 +14,7 @@ import { registerAllHandlers, registerInitHandlers, registerPathsHandlers, regis
 import { routeCommand } from './router.js';
 import { handleWizardTextInput } from './flows/project-wizard.js';
 import { handlePlanWizardTextInput } from './flows/plan-wizard.js';
+import { handleRequirementWizardTextInput } from './flows/requirement-wizard.js';
 
 let bot: Bot | null = null;
 let webappServer: WebAppServer | null = null;
@@ -79,6 +80,10 @@ export async function startBot(): Promise<void> {
       // Check project wizard first
       const handledByProjectWizard = await handleWizardTextInput(ctx, text);
       if (handledByProjectWizard) return;
+
+      // Check requirement wizard
+      const handledByRequirementWizard = await handleRequirementWizardTextInput(ctx, text);
+      if (handledByRequirementWizard) return;
 
       // Check plan wizard
       const handledByPlanWizard = await handlePlanWizardTextInput(ctx, text);

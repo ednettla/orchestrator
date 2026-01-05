@@ -12,6 +12,10 @@ import { getProjectRegistry } from '../../core/project-registry.js';
 import { getGlobalStore } from '../../core/global-store.js';
 import { handleWizardCallback } from '../flows/project-wizard.js';
 import { handlePlanWizardCallback } from '../flows/plan-wizard.js';
+import {
+  handleRequirementWizardCallback,
+  startRequirementWizard,
+} from '../flows/requirement-wizard.js';
 import { safeEditMessage } from '../utils/safe-edit.js';
 import { sendTyping } from '../utils/typing.js';
 import {
@@ -62,6 +66,12 @@ async function handleCallback(ctx: Context): Promise<void> {
   // Handle plan wizard callbacks (planwiz:action:projectName:...)
   if (rawData.startsWith('planwiz:')) {
     await handlePlanWizardCallback(ctx, rawData);
+    return;
+  }
+
+  // Handle requirement wizard callbacks (reqwiz:action:projectName)
+  if (rawData.startsWith('reqwiz:')) {
+    await handleRequirementWizardCallback(ctx, rawData);
     return;
   }
 
@@ -152,6 +162,9 @@ async function handleCallback(ctx: Context): Promise<void> {
         break;
       case 'reqs':
         await handleReqs(ctx, data);
+        break;
+      case 'add_req':
+        await handleAddReq(ctx, data);
         break;
 
       // Config Actions
@@ -763,6 +776,17 @@ async function handleRetryReq(ctx: Context, data: CallbackData): Promise<void> {
 
 async function handleReqs(ctx: Context, data: CallbackData): Promise<void> {
   await handleReqAll(ctx, data);
+}
+
+async function handleAddReq(ctx: Context, data: CallbackData): Promise<void> {
+  const projectName = data.projectName;
+  if (!projectName) {
+    await ctx.answerCallbackQuery({ text: 'Project not found' });
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
+  await startRequirementWizard(ctx, projectName);
 }
 
 // ============================================================================

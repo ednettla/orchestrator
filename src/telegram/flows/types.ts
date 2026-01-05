@@ -268,3 +268,30 @@ export const QUESTION_CATEGORY_LABELS: Record<string, string> = {
   priority: 'Priority',
   constraints: 'Constraints',
 };
+
+// ============================================================================
+// Requirement Wizard State
+// ============================================================================
+
+export type RequirementWizardStep = 'input' | 'added';
+
+export interface RequirementWizardState {
+  step: RequirementWizardStep;
+  projectPath: string;
+  projectName: string;
+  messageId?: number | undefined;
+}
+
+/**
+ * Create initial requirement wizard state
+ */
+export function createInitialRequirementWizardState(
+  projectName: string,
+  projectPath: string
+): RequirementWizardState {
+  return {
+    step: 'input',
+    projectPath,
+    projectName,
+  };
+}
