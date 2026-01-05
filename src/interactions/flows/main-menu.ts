@@ -161,11 +161,22 @@ export const mainMenuFlow: Flow<MainMenuContext> = {
     // ========================================================================
     menu: {
       id: 'menu',
-      interaction: (ctx) => ({
-        type: 'select',
-        message: 'What would you like to do?',
-        options: buildMainMenuOptions(ctx),
-      }),
+      interaction: (ctx) => {
+        let message = 'What would you like to do?';
+
+        // Add project context for better UX
+        if (ctx.projectName) {
+          message = `📁 ${ctx.projectName}\n\nWhat would you like to do?`;
+        } else if (!ctx.hasProject) {
+          message = 'No project selected.\n\nWhat would you like to do?';
+        }
+
+        return {
+          type: 'select',
+          message,
+          options: buildMainMenuOptions(ctx),
+        };
+      },
       handle: async (response, ctx) => {
         ctx.selectedAction = response as string;
 
